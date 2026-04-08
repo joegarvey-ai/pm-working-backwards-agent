@@ -1,0 +1,35 @@
+feature_summary: >
+  A self-service analytics dashboard for e-commerce merchants that shows
+  real-time conversion funnel data, replacing the current static weekly
+  PDF reports.
+
+goals: >
+  Reduce merchant support tickets about reporting by 60%. Increase merchant
+  retention by 10% within 6 months of launch.
+
+timing: >
+  Development start Q3 2026, beta launch Q4 2026.
+
+user_summary: >
+  Mid-market e-commerce merchants (50-500 employees) who sell physical goods
+  online, primarily using Shopify or WooCommerce. Most are not technical —
+  they rely on their ops team to interpret data.
+
+success_metrics: >
+  Dashboard adoption rate of 70% within 90 days. Support ticket volume for
+  reporting drops from 200/month to under 80/month.
+
+known_constraints: >
+  Must integrate with existing Shopify and WooCommerce APIs. No budget for
+  third-party BI tools — must be built in-house. Data must stay in our AWS
+  environment (SOC 2 requirement).
+
+internal_context: ""
+
+# Optional: Where to publish the approved research brief.
+# Set to any local directory path. Examples:
+#   "~/Desktop/research_briefs"
+#   "~/Documents/pm_research"
+#   "~/Dropbox/work/research"
+# Leave empty to keep the brief only in ./output/.
+publish_destination: ""

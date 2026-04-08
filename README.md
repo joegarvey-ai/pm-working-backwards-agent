@@ -1,0 +1,100 @@
+# PM Working Backwards Agent
+
+An open-source multi-agent AI system that guides product managers from a rough problem statement through stakeholder-ready research, a Working Backwards PRFAQ, a BRD, and an engineer-ready build spec. Built on [CrewAI](https://www.crewai.com/) and Claude.
+
+This is for product managers, not engineers. If you can edit a YAML file and copy-paste an API key, you can run it. See [SETUP.md](SETUP.md) for a step-by-step walkthrough that assumes you have never used a terminal.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[input.yaml<br/>Problem statement] --> B[Agent 1<br/>Research]
+    B --> C[research_brief.md]
+    C --> D[Agent 2<br/>PRFAQ]
+    D --> E[prfaq_v1.0.md]
+    E --> F[Agent 3<br/>BRD]
+    F --> G[brd_v1.0.md]
+    G --> H[Agent 4<br/>Build Spec]
+    H --> I[build_spec.md]
+    I --> J[Drop into<br/>Kiro / Claude Code / Cursor]
+```
+
+You write a short problem statement. The agents do the research, write the Working Backwards document, translate it into requirements, and produce a build spec your engineers (or coding agent) can run with. You stay in the loop at every handoff.
+
+## Quick start
+
+Prerequisites: Python 3.11+, [uv](https://github.com/astral-sh/uv), an Anthropic API key, a Tavily API key.
+
+```bash
+git clone https://github.com/joegarvey-ai/pm-working-backwards-agent.git
+cd pm-working-backwards-agent
+crewai install
+cp .env.example .env
+# Open .env and paste in your ANTHROPIC_API_KEY and TAVILY_API_KEY
+uv run pm_agent_system full-pipeline examples/input.yaml
+```
+
+The first run takes 5-10 minutes and produces files in `./output/`. See [examples/](examples/) for what those files look like.
+
+For a step-by-step setup walkthrough written for non-technical users, read [SETUP.md](SETUP.md).
+
+## CLI commands
+
+| Command | What it does |
+|---|---|
+| `research <input.yaml>` | Run Agent 1 only. Produces a research brief. |
+| `generate <input.yaml>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. |
+| `revise --prfaq-path <file>` | Run Agent 2 to revise an existing PRFAQ. Pass `--context-text` or `--context-path` for the revision notes. |
+| `full-pipeline <input.yaml>` | Run all four agents end to end. Produces research brief, PRFAQ, BRD, and build spec. |
+| `brd <input.yaml> --prfaq-path <file>` | Run Agent 3 to produce a BRD and build spec from an approved PRFAQ. |
+| `build-spec --brd-path <file>` | Regenerate just the build spec from an approved BRD. Useful when switching `--target-tool`. |
+| `revise-brd --brd-path <file>` | Revise an existing BRD. Pass `--context-text` or `--context-path` for the revision notes. |
+| `clean --archive` / `--list` / `--delete-archive` | Manage the `./output/` directory retention policy. |
+
+Run `uv run pm_agent_system <command> --help` for the full options on any command.
+
+## Configuration
+
+All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
+
+| Variable | Required | What it is |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | Your Anthropic API key. The agents use Claude. |
+| `TAVILY_API_KEY` | yes | Your Tavily API key. The research agent uses Tavily for web search. |
+| `DOVETAIL_API_TOKEN` | no | Optional. If you have a Dovetail UX research workspace, the research agent will pull customer evidence from it. Leave blank to skip. |
+| `STYLE_GUIDE_PATH` | no | Path to your writing style guide. Defaults to `samples/style-guide-sample.md`. |
+| `OBSIDIAN_VAULT_PATH` | no | Optional. Path to your Obsidian vault if you want the agents to search your notes. |
+| `OUTPUT_DIR` | no | Where output files go. Defaults to `./output/`. |
+| `DEFAULT_TARGET_TOOL` | no | Which coding tool the build spec is formatted for. One of `kiro`, `claude_code`, `cursor`, `lovable`. Defaults to `kiro`. |
+| `OUTPUT_RETENTION_DAYS` | no | How many days output files live before being archived. Defaults to 30. |
+
+## Architecture
+
+Four agents, each with a single job, chained by a CrewAI orchestrator.
+
+| Agent | Job | Tools |
+|---|---|---|
+| 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, Dovetail (optional), Obsidian (optional), file readers |
+| 2. PRFAQ | Turn the research brief into a Working Backwards press release and FAQ | Style guide loader |
+| 3. BRD | Translate the approved PRFAQ into functional and non-functional requirements | Tavily (cost flags, API doc lookups) |
+| 4. Build Spec | Format the BRD into a coding-agent-ready spec | None |
+
+The orchestrator lives in `src/pm_agent_system/crew.py`. Agent and task definitions are in `src/pm_agent_system/config/agents.yaml` and `tasks.yaml`. Each agent's outputs are validated against a Pydantic model in `src/pm_agent_system/models/`.
+
+A human-in-the-loop checkpoint sits between every stage. The agents do not auto-advance from research to PRFAQ or PRFAQ to BRD. You read the output, decide if it is good, and either approve it or run the `revise` command.
+
+## Known limitations
+
+- The system has been tested on a small number of product problems. It works well for "we want to build X for Y users" but has not been stress-tested on M&A diligence, pricing strategy, or pure platform engineering problems.
+- Agent 1 only knows what it can find via Tavily, Dovetail, your Obsidian vault, and any files you point it at. It cannot access paywalled research or your internal Slack.
+- Output quality depends heavily on the input. A vague input gets a vague output. The example in `examples/input.yaml` shows the level of specificity that produces good results.
+- A full pipeline run costs roughly $1-3 in API usage at current Claude pricing. Run `research` first if you want a cheap sanity check before committing.
+- This is research software. It is not enterprise-ready. There is no auth, no multi-tenancy, no audit log.
+
+## License
+
+[MIT](LICENSE). Use it, fork it, ship it.
+
+## Contributing
+
+Pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the short version of how to help.

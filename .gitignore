@@ -1,0 +1,17 @@
+.env
+.env.local
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+output/
+output/archive/
+!output/.gitkeep
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

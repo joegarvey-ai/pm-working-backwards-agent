@@ -1,0 +1,617 @@
+research_task:
+  description: >
+    You have been given a product research request from a PM. Your job is to
+    gather comprehensive evidence from all available sources and produce a
+    structured research brief.
+
+    ## PM Input
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Goals:** {goals}
+
+    **Timing:** {timing}
+
+    **User Summary:** {user_summary}
+
+    **Success Metrics:** {success_metrics}
+
+    **Known Constraints:** {known_constraints}
+
+    **Internal Context:** {internal_context}
+
+    ## Research Process
+
+    1. **Validate inputs.** Confirm that Feature Summary, Goals, Timing, and
+       User Summary are present and specific enough to act on. If any are
+       missing or too vague, stop and ask the PM to fill in the gaps. If
+       Success Metrics, Known Constraints, or Internal Context are missing,
+       note it but proceed.
+
+    2. **External research.** Use the Tavily search tool to find:
+       - Market sizing data (real numbers, named sources)
+       - 3-5 competitors or comparable products at the relevant scale
+       - Public customer quotes from reviews, forums, or analyst reports
+       - Industry benchmarks with attribution
+
+    3. **Customer evidence.** Use the Dovetail research tool to find:
+       - Customer interview transcripts related to the problem
+       - Usability findings and highlights
+       - Published insights from prior research
+       - Direct customer quotes, attributed by source
+
+    4. **Internal context.** If the PM provided internal context file paths,
+       use the file reader tool to read those documents and extract relevant
+       technical state, constraints, or prior decisions.
+
+    5. **Synthesize findings** into the output structure below. Do NOT
+       interpret or recommend. Organize the evidence factually. Flag gaps
+       honestly.
+
+    ## Writing Rules (Hard Constraints)
+
+    Every fact must be cited inline with a markdown link in the format
+    `[source name](url)` placed immediately after the claim. Do NOT defer
+    citations to a sources section only. The Sources section at the bottom
+    is a duplicate index, not the primary citation.
+
+    ## Output Format
+
+    Return your findings as a JSON object matching the ResearchOutput schema
+    enforced by the task. Every text field (context, executive_summary,
+    strategic_implications, competitor descriptions, customer quotes, etc.)
+    must follow the writing rules below. Inline `[source name](url)`
+    citations belong inside the text fields wherever a factual claim is
+    made — Pydantic does not strip them.
+
+    Banned words and phrases (do not use any of these):
+    robust, comprehensive, powerful, cutting-edge, transformative,
+    game-changing, revolutionary, best-in-class, seamless, incredibly,
+    significantly, essentially, very, really, quite, extremely, strong,
+    leverage, synergies, drive alignment, holistic, unlock, supercharge.
+
+    Sentence rules:
+    - No em dashes. Restructure instead.
+    - No contrast hooks ("It's not X, it's Y" / "This isn't about X").
+    - No filler transitions ("In today's landscape", "It's worth noting").
+    - Lead with the claim. Follow with the evidence.
+    - Vary sentence length. Short sentences for emphasis.
+    - Active voice by default.
+
+    Evidence rules:
+    - Every impact claim needs a real number AND a source.
+    - "Strong market opportunity" is banned. "$30.32B in 2026, 17.9% CAGR
+      ([Coherent Market Insights](url))" is correct.
+    - If you don't have a number, say so in Gaps and Limitations.
+    - Direct customer quotes go in quotation marks with the source.
+
+  expected_output: >
+    A markdown document with the following sections. Every factual claim
+    must include an inline `[source](url)` citation.
+
+    # Research Brief: [Feature/Idea Name]
+
+    ## 1. Context
+    1-3 sentences restating the problem based on PM input. No citations
+    needed here since this is the PM's own framing.
+
+    ## 2. Key Findings
+    Bulleted summary of the most important findings. Every bullet that
+    makes a factual claim must cite its source inline.
+
+    ## 3. Detailed Findings
+
+    ### 3a. Market Sizing
+    Real numbers with inline citations. If a number isn't available, say
+    so and move it to Gaps.
+
+    ### 3b. Competitive Landscape
+    3-5 competitors. For each: name, positioning, features, pricing (if
+    public), and source link. Group by tier (enterprise, mid-market, etc.)
+    if relevant.
+
+    ### 3c. Customer Evidence
+    Direct quotes from Dovetail and public sources. Each quote in
+    quotation marks with attribution and link.
+
+    ### 3d. Pain Point Summary
+    Pain points ranked by frequency or severity, with the evidence that
+    supports the ranking cited inline.
+
+    ### 3e. Internal State Assessment
+    Summary of relevant internal docs if provided. If none provided,
+    write: "No internal context was provided for this request."
+
+    ## 4. Strategic Implications
+    Factual summary of what the data points to. No recommendations.
+    Every implication tied to a cited finding above.
+
+    ## 5. Gaps and Limitations
+    What couldn't be found. What sources were unavailable. What
+    assumptions remain unvalidated.
+
+    ## 6. Sources
+    Full list of sources by type, with URLs. This is an index, not the
+    primary citation mechanism.
+
+  agent: research_agent
+  human_input: true
+
+generate_prfaq:
+  description: >
+    You have an approved ResearchOutput from the Research Agent and the PM's
+    original structured input. Your job is to produce a complete PRFAQ v1.0
+    (Working Backwards document) that a VP could approve.
+
+    ## PM Input
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Goals:** {goals}
+
+    **Timing:** {timing}
+
+    **User Summary:** {user_summary}
+
+    **Success Metrics:** {success_metrics}
+
+    **Known Constraints:** {known_constraints}
+
+    **Internal Context:** {internal_context}
+
+    ## Process
+
+    1. **Load the style guide first.** Call the style_guide_loader tool
+       before drafting anything. Apply its rules in addition to the rules
+       in your backstory.
+
+    2. **Read the ResearchOutput from prior task context.** Use it as the
+       single source of truth for facts. Every claim in the PRFAQ must
+       trace back to a research finding or be flagged as an assumption.
+
+    3. **Honor the gaps.** If the ResearchOutput's gaps_and_limitations
+       list is non-empty, you MUST reference those gaps honestly in the
+       internal FAQ risk question and in the appendix_gaps. Do not write
+       around them. Do not pretend they don't exist.
+
+    4. **Draft the PRFAQ** in the structure below.
+
+    5. **Return as a JSON object matching the PRFAQOutput schema.** Inline
+       `[source name](url)` citations belong inside text fields wherever a
+       factual claim is made. Pydantic does not strip them.
+
+    ## PRFAQ Structure
+
+    ### 1. Press Release (300-500 words)
+    Future-state announcement, written as if the product has already
+    launched. Dateline at the top. Include:
+    - Headline (clear, no hyperbole)
+    - Subheadline (one sentence on the customer benefit)
+    - Opening paragraph: who it's for, what it does, why it matters
+    - 2-3 paragraphs of detail with real evidence
+    - One fictional customer quote, attributed to a fictional but realistic
+      person, grounded in the real customer evidence from research
+    - Closing call to action
+
+    ### 2. External FAQs (minimum 3, customer-facing)
+    Questions a customer would actually ask. Plain language. Each answer
+    cites evidence where applicable.
+
+    ### 3. Internal FAQs (minimum 5, stakeholder-facing)
+    Questions a VP, eng lead, designer, or finance partner would ask.
+    MUST include:
+    - A strategy question answered using the Good Strategy / Bad Strategy
+      framework: diagnosis (what's the situation), guiding policy (what
+      approach), coherent actions (what specific steps).
+    - A risk question that surfaces real risks and gaps from the research,
+      not sanitized ones.
+    - A "what could go wrong" or "what would make us kill this" answer.
+
+    ### 4. Customer Experience Narrative (1-2 pages)
+    End-to-end user experience story. Present tense. Third person. Specific
+    enough that a designer could sketch from it. Walk through the customer's
+    actual flow from trigger through outcome. Name the screens, the
+    decisions, the moments of friction or delight. No vague language.
+
+    ### 5. Appendices
+    - **appendix_data_points:** Key facts and metrics from research, each
+      with inline `[source](url)` citation.
+    - **appendix_competitor_table:** Each competitor as a dict with at
+      least: name, positioning, key_features, pricing (if known), source.
+    - **appendix_customer_quotes:** Direct quotes from research, preserved
+      with attribution and source.
+    - **appendix_gaps:** Open questions, unvalidated assumptions, anything
+      the research couldn't answer.
+
+    ### 6. Version History
+    Start with one entry: version "1.0", today's date, author "Agent 2",
+    changes "Initial draft generated from approved research."
+
+  expected_output: >
+    A PRFAQOutput JSON object with all required fields populated. Inline
+    citations preserved inside text fields. Press release is 300-500 words.
+    External FAQs >= 3. Internal FAQs >= 5 and include the strategy
+    question and the risk question. Customer experience narrative is
+    specific and concrete. Version history starts at 1.0.
+
+  agent: prfaq_agent
+  human_input: true
+  context:
+    - research_task
+
+revise_prfaq:
+  description: >
+    You are revising an existing PRFAQ based on stakeholder feedback. This
+    task does NOT depend on the Research Agent — work only from the inputs
+    below.
+
+    ## Inputs
+
+    **Current PRFAQ file path:** {prfaq_path}
+
+    **Revision context (file path, may be empty):** {context_path}
+
+    **Revision context (inline text, may be empty):** {context_text}
+
+    ## Process
+
+    1. **Load the style guide first.** Call style_guide_loader before
+       drafting anything.
+
+    2. **Read the current PRFAQ** from prfaq_path using the file_reader
+       tool. Parse the structure and existing version history.
+
+    3. **Read revision context.** If context_path is set, use file_reader
+       to load it (it may point to a file or a folder of files). If
+       context_text is set, use it as-is. Combine both if both are present.
+
+    4. **Pause and ask the PM** which sections need revision. Use the
+       human_input checkpoint to confirm scope before rewriting. Do not
+       assume. The valid sections are: press_release, external_faqs,
+       internal_faqs, customer_experience_narrative, appendix_data_points,
+       appendix_competitor_table, appendix_customer_quotes, appendix_gaps.
+
+    5. **Update ONLY the sections the PM identified.** Preserve every
+       other section exactly as it appeared in v1.0 (or whatever the
+       current version is). Do not "improve" untouched sections.
+
+    6. **Maintain inline citations** from the original where they still
+       apply. If revision context contradicts a cited claim, flag the
+       contradiction in the internal FAQ rather than silently overwriting.
+
+    7. **Append a new version history entry.** Bump the version (1.0 -> 1.1,
+       1.1 -> 1.2, etc.). Use today's date. Author "Agent 2". Changes
+       field should describe what was revised and why, in one or two
+       sentences.
+
+    8. **Return the full PRFAQOutput JSON object** with all sections —
+       updated and preserved alike. The output is always a complete
+       document, not a diff.
+
+  expected_output: >
+    A PRFAQOutput JSON object containing the full revised PRFAQ. Only the
+    PM-approved sections show new content; all other sections match the
+    input PRFAQ verbatim. Version history has one new entry at the end
+    with the bumped version number.
+
+  agent: prfaq_agent
+  human_input: true
+
+generate_brd_chained:
+  description: >
+    Produce a complete BRD v1.0 that an engineer can build from without
+    scheduling a clarification meeting. Use the approved PRFAQ and
+    research from the prior tasks in this pipeline.
+
+    ## Process
+
+    1. **Load the style guide** via style_guide_loader before drafting
+       the prose sections (executive summary, problem statement, technical
+       context). Apply its rules.
+
+    2. **Use the prior task context.** The ResearchOutput and PRFAQOutput
+       from the upstream tasks are the source of truth. Every claim and
+       every requirement must trace back to the PRFAQ, the research, or
+       the PM's known constraints.
+
+    3. **Apply the AWS-first rule.** All architecture references default
+       to AWS services (Lambda, DynamoDB, Cognito, API Gateway, S3,
+       CloudFront, SNS/SQS/EventBridge, Bedrock). Do not reference
+       Supabase, Firebase, Vercel, or other non-enterprise services
+       unless the PM's constraints explicitly require them.
+
+    4. **Use Tavily** to find reference URLs for cost-flagged decisions
+       (AWS pricing pages, service limits, comparison docs). Do NOT
+       estimate dollar amounts. Flag the decision and link the reference.
+
+    5. **Honor research gaps.** If the ResearchOutput's
+       gaps_and_limitations is non-empty OR the PRFAQ's appendix_gaps is
+       non-empty, surface them in the risk section. Do not paper over them.
+
+    6. **Enforce traceability.** Every functional requirement must
+       reference at least one user story ID. Every user story must
+       reference a research finding or PRFAQ section in its source field.
+
+    7. **Return as a JSON object matching the BRDOutput schema.**
+
+    ## BRD Structure (12 sections)
+
+    1. **Executive summary** — 3-5 sentences: what we're building, who
+       for, and the expected outcome.
+    2. **Problem statement** — what's broken, who it affects, evidence.
+    3. **Proposed solution overview** — high-level approach. MUST include
+       a Mermaid architecture diagram inline as a fenced ```mermaid block.
+    4. **User stories** — minimum 3. Each has ID (US-001), persona,
+       action, outcome, priority (P0/P1/P2), and source.
+    5. **Functional requirements** — minimum 3. Each has ID (FR-001),
+       "The system shall..." description, rationale, given/when/then
+       acceptance criteria, related user story IDs, and code samples
+       (API contracts as JSON, data model schemas, integration snippets)
+       where they help an engineer understand the requirement.
+    6. **Non-functional requirements** — minimum 2. Categories:
+       performance, security, scalability, accessibility, compliance.
+       Quantified targets only. "Fast" is banned; "p95 latency < 200ms"
+       is correct.
+    7. **Technical context and dependencies** — current state. MUST
+       include a Mermaid diagram of the existing system inline.
+    8. **Cost flags** — architectural decisions with cost implications.
+       Each flag: decision, why_it_matters, tradeoff, reference_url
+       (from Tavily). No dollar amounts.
+    9. **Risks** — minimum 2. Each has description, likelihood
+       (high/medium/low), impact, and mitigation. Items from research
+       gaps go here.
+    10. **Success metrics** — minimum 1. Each has metric, target_value,
+        measurement_method (e.g., "CloudWatch custom metric"), timeline.
+    11. **Timeline and milestones** — high-level phases.
+    12. **Version history** — start with v1.0, today's date, author
+        "Agent 3", changes "Initial draft generated from approved PRFAQ."
+
+  expected_output: >
+    A BRDOutput JSON object with all required fields populated. User
+    stories >= 3 with traceability. Functional requirements >= 3 with
+    code samples where useful. NFRs >= 2 with quantified targets. At
+    least one Mermaid diagram each in proposed_solution_overview and
+    technical_context_and_dependencies. Cost flags include real
+    reference URLs. Risks >= 2. Version history starts at 1.0.
+
+  agent: brd_agent
+  human_input: true
+  context:
+    - research_task
+    - generate_prfaq
+
+revise_brd:
+  description: >
+    Revise specific sections of an existing BRD based on stakeholder
+    feedback. This task is independent of Agents 1 and 2.
+
+    ## Inputs
+
+    **Current BRD file path:** {brd_path}
+
+    **Revision context (file path, may be empty):** {context_path}
+
+    **Revision context (inline text, may be empty):** {context_text}
+
+    ## Process
+
+    1. **Load the style guide** via style_guide_loader.
+    2. **Read the current BRD** from brd_path using file_reader. Parse
+       the structure and current version history.
+    3. **Read revision context** from context_path (if set) and/or
+       context_text (if set).
+    4. **Pause and ask the PM** which sections need revision via the
+       human_input checkpoint. Valid sections: executive_summary,
+       problem_statement, proposed_solution_overview, user_stories,
+       functional_requirements, non_functional_requirements,
+       technical_context_and_dependencies, cost_flags, risks,
+       success_metrics, timeline_and_milestones.
+    5. **Update ONLY the sections the PM identified.** Preserve everything
+       else exactly as-is. Do not "improve" untouched sections.
+    6. **Maintain AWS-first defaults** and traceability rules in any
+       new content.
+    7. **Append a new version history entry.** Bump the version
+       (1.0 -> 1.1, etc.). Today's date. Author "Agent 3". Changes field
+       summarizes what was revised and why in 1-2 sentences.
+    8. **Return the full BRDOutput** with all sections — updated and
+       preserved alike.
+
+  expected_output: >
+    A BRDOutput JSON object containing the full revised BRD. Only the
+    PM-approved sections show new content; all other sections match the
+    input BRD verbatim. Version history has one new appended entry with
+    the bumped version number.
+
+  agent: brd_agent
+  human_input: true
+
+generate_build_spec_chained:
+  description: >
+    Produce a build spec from the approved BRD, formatted for the PM's
+    chosen coding tool. The BRDOutput is available in your prior task
+    context — use it directly.
+
+    ## Inputs
+
+    **Target tool:** {target_tool}
+
+    Valid target tools: kiro, claude_code, cursor, lovable.
+
+    ## Process
+
+    1. **Load the style guide** via style_guide_loader for any prose.
+    2. **Use the BRDOutput from prior task context** as the source of truth.
+    3. **Carry acceptance criteria forward EXACTLY.** Do not paraphrase,
+       summarize, or reword them. Copy them character-for-character from
+       the BRD's functional requirements into the feature_specs.
+    4. **Carry forward code samples** from the BRD as implementation
+       guidance.
+    5. **Identify out-of-scope items.** P2 items from the BRD and
+       anything from known constraints that limits the build go here.
+       The coding tool MUST NOT build these.
+    6. **Format the formatted_spec field** for the chosen target tool.
+
+    ## Build Spec Structure
+
+    1. **build_summary** — 2-3 sentences: what to build, for whom, done condition.
+    2. **user_flows** — minimum 1. Each has name, ordered steps, related FR-### IDs.
+    3. **feature_specs** — minimum 1. Each has name, description,
+       acceptance_criteria (EXACT from BRD), priority, code_samples.
+    4. **technical_constraints** — AWS-specific constraints.
+    5. **architecture_reference** — Mermaid diagram + description from BRD.
+    6. **current_state_context** — relevant excerpts from BRD's technical context.
+    7. **out_of_scope** — explicit list of P2 items and constraint exclusions.
+    8. **target_tool** — the chosen tool name.
+    9. **formatted_spec** — the complete tool-ready output. See below.
+
+    ## Tool-specific formatting rules for formatted_spec
+
+    - **kiro**: Format as a Kiro-compatible spec with three sections:
+      Requirements (use EARS notation if natural — "WHEN <trigger> THE
+      SYSTEM SHALL <response>"), Design (architecture, data models,
+      sequence diagrams), and Tasks (implementation steps). Kiro will
+      generate its own design doc from this.
+    - **claude_code**: Format as a structured markdown prompt with clear
+      sections (## What this builds, ## Step 1..N, ## What NOT to do,
+      ## How to verify). Include explicit file structure expectations.
+      Match the style of the Claude Code Prompts in the project's
+      planning docs.
+    - **cursor**: Format as a composer-ready markdown prompt with
+      Context, Requirements, Constraints, and References sections.
+    - **lovable**: Format as a natural language Agent Mode prompt
+      describing the application, its features, user flows, and
+      technical requirements conversationally. No bullet lists or
+      headers — narrative prose.
+
+  expected_output: >
+    A CodingPromptOutput JSON object. acceptance_criteria in feature_specs
+    match the BRD verbatim. formatted_spec is populated with the complete
+    tool-specific output for the requested target_tool. out_of_scope
+    explicitly lists P2 items and constraint-driven exclusions.
+
+  agent: brd_agent
+  human_input: true
+  context:
+    - generate_brd_chained
+
+generate_brd_standalone:
+  description: >
+    Produce a complete BRD v1.0 from an approved PRFAQ and research brief
+    that already exist on disk. Read both files via the file_reader tool.
+
+    ## Inputs
+
+    **Approved PRFAQ file path:** {prfaq_path}
+
+    **Research brief file path (may be empty if unavailable):** {research_path}
+
+    ## Process
+
+    1. **Load the style guide** via style_guide_loader before drafting
+       the prose sections.
+
+    2. **Read the PRFAQ from {prfaq_path}** using the file_reader tool.
+       This is the primary source of truth.
+
+    3. **If {research_path} is non-empty, read it as well** for the
+       underlying market and customer evidence.
+
+    4. **Apply the AWS-first rule.** All architecture references default
+       to AWS services (Lambda, DynamoDB, Cognito, API Gateway, S3,
+       CloudFront, SNS/SQS/EventBridge, Bedrock). Do not reference
+       Supabase, Firebase, Vercel, or other non-enterprise services
+       unless the PM's constraints explicitly require them.
+
+    5. **Use Tavily** to find reference URLs for cost-flagged decisions.
+       Do NOT estimate dollar amounts.
+
+    6. **Honor gaps.** If the PRFAQ surfaces open gaps or risks,
+       carry them into the BRD risk section.
+
+    7. **Enforce traceability.** Every functional requirement must
+       reference at least one user story ID. Every user story must
+       reference a research finding or PRFAQ section in its source field.
+
+    8. **Return as a JSON object matching the BRDOutput schema.**
+
+    ## BRD Structure (12 sections)
+
+    1. **Executive summary** — 3-5 sentences.
+    2. **Problem statement** — what's broken, who it affects, evidence.
+    3. **Proposed solution overview** — MUST include a Mermaid architecture
+       diagram inline.
+    4. **User stories** — minimum 3, with ID, persona, action, outcome,
+       priority (P0/P1/P2), source.
+    5. **Functional requirements** — minimum 3, "The system shall...",
+       given/when/then acceptance criteria, related user story IDs,
+       and code samples (API contracts, schemas) where useful.
+    6. **Non-functional requirements** — minimum 2, quantified targets only.
+    7. **Technical context and dependencies** — MUST include a Mermaid
+       diagram of the existing system.
+    8. **Cost flags** — decision, why_it_matters, tradeoff, reference_url.
+    9. **Risks** — minimum 2.
+    10. **Success metrics** — minimum 1.
+    11. **Timeline and milestones**.
+    12. **Version history** — start with v1.0, today's date, author "Agent 3".
+
+  expected_output: >
+    A BRDOutput JSON object with all required fields populated. Same
+    quality bar as the chained version. Version history starts at 1.0.
+
+  agent: brd_agent
+  human_input: true
+
+generate_build_spec_standalone:
+  description: >
+    Produce a build spec from an approved BRD that already exists on disk.
+    Read the BRD file via the file_reader tool.
+
+    ## Inputs
+
+    **Approved BRD file path:** {brd_path}
+
+    **Target tool:** {target_tool}
+
+    Valid target tools: kiro, claude_code, cursor, lovable.
+
+    ## Process
+
+    1. **Load the style guide** via style_guide_loader for any prose.
+    2. **Read the BRD from {brd_path}** using file_reader. This is the
+       source of truth for requirements, code samples, and architecture.
+    3. **Carry acceptance criteria forward EXACTLY.** Do not paraphrase,
+       summarize, or reword them. Copy them character-for-character from
+       the BRD's functional requirements into the feature_specs.
+    4. **Carry forward code samples** from the BRD as implementation
+       guidance.
+    5. **Identify out-of-scope items.** P2 items from the BRD and
+       constraint-driven exclusions. The coding tool MUST NOT build these.
+    6. **Format the formatted_spec field** for the chosen target tool.
+
+    ## Build Spec Structure
+
+    1. **build_summary** — 2-3 sentences: what to build, for whom, done condition.
+    2. **user_flows** — minimum 1.
+    3. **feature_specs** — minimum 1, acceptance_criteria EXACT from BRD.
+    4. **technical_constraints** — AWS-specific.
+    5. **architecture_reference** — Mermaid diagram + description from BRD.
+    6. **current_state_context** — relevant excerpts from BRD's technical context.
+    7. **out_of_scope** — explicit list.
+    8. **target_tool** — the chosen tool name.
+    9. **formatted_spec** — the complete tool-ready output.
+
+    ## Tool-specific formatting rules for formatted_spec
+
+    - **kiro**: Requirements (EARS notation), Design, Tasks sections.
+    - **claude_code**: Structured markdown prompt with ## What this builds,
+      ## Step 1..N, ## What NOT to do, ## How to verify sections.
+    - **cursor**: Composer-ready markdown with Context, Requirements,
+      Constraints, References sections.
+    - **lovable**: Natural language Agent Mode prompt, narrative prose only.
+
+  expected_output: >
+    A CodingPromptOutput JSON object. acceptance_criteria match the BRD
+    verbatim. formatted_spec populated for the requested target_tool.
+
+  agent: brd_agent
+  human_input: true
