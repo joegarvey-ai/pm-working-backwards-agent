@@ -1,0 +1,26 @@
+---
+description: PM Working Backwards pipeline - research, PRFAQ, BRD, and build spec generation
+globs: ["**/*.yaml", "**/*.md", "**/*.py"]
+---
+
+# PM Working Backwards Agent
+
+This project is a multi-agent PM system. When working in this repo:
+
+## Pipeline
+1. Research Agent -> market research, competitive analysis, customer evidence
+2. PRFAQ Agent -> Working Backwards document for stakeholder alignment
+3. BRD Agent -> engineer-ready requirements with code samples
+4. Build Spec -> tool-specific output for Kiro, Claude Code, Cursor, or Lovable
+
+## Conventions
+- AWS services by default for all architecture
+- "The system shall..." format for requirements
+- Given/when/then acceptance criteria
+- Inline citations for all factual claims
+- No em dashes, no contrast hooks, no hyperbole
+
+## Running
+- Install: `crewai install`
+- Run: `uv run pm_agent_system full-pipeline examples/input.yaml`
+- Test: `uv run pytest tests/`

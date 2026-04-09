@@ -50,6 +50,20 @@ The first run takes 5-10 minutes and produces files in `./output/`. See [example
 
 For a step-by-step setup walkthrough written for non-technical users, read [SETUP.md](SETUP.md).
 
+## Platform Support
+
+This system runs in multiple environments. Choose the one that fits your workflow:
+
+| Platform | How It Works | Setup Guide |
+|---|---|---|
+| **CLI** | Python commands in your terminal | [SETUP.md](SETUP.md) |
+| **Kiro** | Native skills and custom agent | [docs/using-with-kiro.md](docs/using-with-kiro.md) |
+| **Claude Code** | CLI from Claude Code terminal | [docs/using-with-claude-code.md](docs/using-with-claude-code.md) |
+| **Claude Desktop / Projects** | Conversational with uploaded knowledge | [docs/using-with-claude-projects.md](docs/using-with-claude-projects.md) |
+| **Cursor** | CLI + Composer with project rules | [docs/using-with-cursor.md](docs/using-with-cursor.md) |
+
+**Don't know which to pick?** If you're comfortable with a terminal, use Claude Code or the CLI. If you prefer conversation, use Claude Desktop or a Claude.ai Project. If you're at Amazon, Kiro is the natural fit.
+
 ## CLI commands
 
 | Command | What it does |
