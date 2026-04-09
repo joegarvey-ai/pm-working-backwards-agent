@@ -64,6 +64,21 @@ This system runs in multiple environments. Choose the one that fits your workflo
 
 **Don't know which to pick?** If you're comfortable with a terminal, use Claude Code or the CLI. If you prefer conversation, use Claude Desktop or a Claude.ai Project. If you're at Amazon, Kiro is the natural fit.
 
+## Common Scenarios
+
+| I need to... | Command |
+|---|---|
+| Validate a product idea with market research | `uv run pm_agent_system research input.yaml` |
+| Write a stakeholder-ready PRFAQ from scratch | `uv run pm_agent_system generate input.yaml` |
+| Run the full pipeline end to end | `uv run pm_agent_system full-pipeline input.yaml` |
+| Revise a PRFAQ after a stakeholder review meeting | `uv run pm_agent_system revise --prfaq-path prfaq_v1.0.md --context-path notes.md` |
+| Turn an approved PRFAQ into an engineer-ready BRD | `uv run pm_agent_system brd input.yaml --prfaq-path prfaq_v1.2.md` |
+| Generate a Kiro build spec from a BRD | `uv run pm_agent_system build-spec --brd-path brd_v1.0.md --target-tool kiro` |
+| Update a BRD after engineering feedback | `uv run pm_agent_system revise-brd --brd-path brd_v1.0.md --context-text "FR-003 needs a GSI"` |
+| Skip the assumption-challenge step | Add `--skip-validation` to any research/generate/full-pipeline command |
+
+Each command pauses for your review before producing the next artifact. See the [CLI Commands](#cli-commands) section below for full details, or the [Platform Support](#platform-support) section for non-CLI options.
+
 ## CLI commands
 
 | Command | What it does |

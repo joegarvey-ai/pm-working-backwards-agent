@@ -1,0 +1,18 @@
+# Team fork .gitignore
+# Append this to your .gitignore after forking for team use.
+# Less restrictive than .private — allows shared team context.
+
+# Individual stakeholder avatars (personal assessments)
+config/stakeholder_avatars/*-personal.yaml
+
+# Output from real pipeline runs
+output/*.md
+output/*.txt
+output/*.yaml
+output/archive/
+
+# Environment with real API keys
+.env
+
+# Personal Obsidian vault path config
+.obsidian-config
