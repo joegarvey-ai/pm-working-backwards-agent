@@ -78,6 +78,12 @@ class PmAgentSystem:
     # ---------- Tasks ----------
 
     @task
+    def validate_input(self) -> Task:
+        return Task(
+            config=self.tasks_config["validate_input"],  # type: ignore[index]
+        )
+
+    @task
     def research_task(self) -> Task:
         return Task(
             config=self.tasks_config["research_task"],  # type: ignore[index]
@@ -138,6 +144,18 @@ class PmAgentSystem:
 
     # ---------- Crews ----------
 
+    def _research_tasks(self, skip_validation: bool = False) -> list[Task]:
+        """Build the research task list, optionally prepending validate_input."""
+        if skip_validation:
+            return [self.research_task()]
+        validation = self.validate_input()
+        research = Task(
+            config=self.tasks_config["research_task"],  # type: ignore[index]
+            output_pydantic=ResearchOutput,
+            context=[validation],
+        )
+        return [validation, research]
+
     @crew
     def crew(self) -> Crew:
         """Default research-only crew (Agent 1). Preserves Phase 2 behavior."""
@@ -148,11 +166,28 @@ class PmAgentSystem:
             verbose=True,
         )
 
-    def research_and_generate_crew(self) -> Crew:
+    def research_crew(self, skip_validation: bool = False) -> Crew:
+        """Research-only crew with optional validation step."""
+        tasks = self._research_tasks(skip_validation)
+        return Crew(
+            agents=[self.research_agent()],
+            tasks=tasks,
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def research_and_generate_crew(self, skip_validation: bool = False) -> Crew:
         """Agent 1 → Agent 2 generate (PRFAQ Mode 1)."""
+        tasks = self._research_tasks(skip_validation)
+        prfaq_task = Task(
+            config=self.tasks_config["generate_prfaq"],  # type: ignore[index]
+            output_pydantic=PRFAQOutput,
+            context=[tasks[-1]],  # research_task is always last
+        )
+        tasks.append(prfaq_task)
         return Crew(
             agents=[self.research_agent(), self.prfaq_agent()],
-            tasks=[self.research_task(), self.generate_prfaq()],
+            tasks=tasks,
             process=Process.sequential,
             verbose=True,
         )
@@ -166,16 +201,29 @@ class PmAgentSystem:
             verbose=True,
         )
 
-    def full_pipeline_crew(self) -> Crew:
+    def full_pipeline_crew(self, skip_validation: bool = False) -> Crew:
         """Agent 1 → Agent 2 → Agent 3 (research → PRFAQ → BRD → build spec)."""
+        tasks = self._research_tasks(skip_validation)
+        research = tasks[-1]
+        prfaq_task = Task(
+            config=self.tasks_config["generate_prfaq"],  # type: ignore[index]
+            output_pydantic=PRFAQOutput,
+            context=[research],
+        )
+        brd_task = Task(
+            config=self.tasks_config["generate_brd_chained"],  # type: ignore[index]
+            output_pydantic=BRDOutput,
+            context=[research, prfaq_task],
+        )
+        spec_task = Task(
+            config=self.tasks_config["generate_build_spec_chained"],  # type: ignore[index]
+            output_pydantic=CodingPromptOutput,
+            context=[brd_task],
+        )
+        tasks.extend([prfaq_task, brd_task, spec_task])
         return Crew(
             agents=[self.research_agent(), self.prfaq_agent(), self.brd_agent()],
-            tasks=[
-                self.research_task(),
-                self.generate_prfaq(),
-                self.generate_brd_chained(),
-                self.generate_build_spec_chained(),
-            ],
+            tasks=tasks,
             process=Process.sequential,
             verbose=True,
         )

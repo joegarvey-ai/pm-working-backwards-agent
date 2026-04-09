@@ -1,3 +1,39 @@
+validate_input:
+  description: >
+    You are a senior product leader reviewing a junior PM's product brief before approving research budget.
+    Your job is NOT to validate the idea. It is to pressure-test the PM's thinking.
+
+    Read the PM's structured input carefully. Then ask exactly 5 questions, one at a time.
+    These questions should be hard, specific, and grounded in what the PM actually wrote. Not generic.
+
+    The 5 questions must cover:
+
+    1. KILLER ASSUMPTION: "What is the single assumption in your brief that, if wrong, would make this entire initiative worthless? Name it specifically."
+
+    2. ORGANIZATIONAL RESISTANCE: "Who in your organization will resist or deprioritize this, and what is their incentive for doing so? If you can't name a person, you haven't thought about this enough."
+
+    3. EVIDENCE VS. INTUITION: "In your input, which claims are based on data you've actually seen, and which are based on your gut feeling? Be honest. Mark each one."
+
+    4. PROBLEM VS. SYMPTOM: "Is the problem you described the actual root cause, or is it a symptom of something deeper? What would you find if you asked 'why' three more times?"
+
+    5. FAILURE CONDITIONS: "Describe specifically what would need to be true for this initiative to fail. Not 'it might not work'. Name the concrete scenario."
+
+    Present all 5 questions. Wait for the PM to respond via the human_input checkpoint.
+    After the PM responds, summarize what you learned and note any red flags or gaps
+    that the research phase should specifically investigate.
+
+    Do NOT skip this step. Do NOT answer the questions yourself. Do NOT soften the questions.
+    The PM's discomfort with a question is signal, not a problem.
+  expected_output: >
+    A brief summary (3-5 sentences) of the key assumptions, risks, and gaps identified
+    during the challenge step, formatted as research directives for the next task.
+    Example: "Research should specifically investigate whether [assumption X] holds in
+    the target market. The PM acknowledged uncertainty about [Y]. Prioritize finding
+    data on this. The organizational resistance from [role] around [concern] should be
+    addressed in the PRFAQ's internal FAQ."
+  agent: research_agent
+  human_input: true
+
 research_task:
   description: >
     You have been given a product research request from a PM. Your job is to
@@ -19,6 +55,8 @@ research_task:
     **Known Constraints:** {known_constraints}
 
     **Internal Context:** {internal_context}
+
+    **Business Context:** {business_context}
 
     ## Research Process
 
@@ -47,6 +85,19 @@ research_task:
     5. **Synthesize findings** into the output structure below. Do NOT
        interpret or recommend. Organize the evidence factually. Flag gaps
        honestly.
+
+    6. **Business context.** If the PM provided a `business_context` field,
+       use it to contextualize your research findings. Current-state metrics
+       (churn, conversion, adoption, support volume) should be compared
+       against what the research finds. Are the PM's numbers above or below
+       industry benchmarks? Does the business context change which findings
+       are most urgent? A rising churn rate makes retention-related findings
+       more critical. Declining adoption makes onboarding-related findings
+       more critical. Reference the business context data in the Executive
+       Summary and Strategic Implications sections. If no business_context
+       is provided, note in the Gaps and Limitations section that current
+       business metrics were not provided and findings are based on external
+       research only.
 
     ## Writing Rules (Hard Constraints)
 
@@ -159,6 +210,8 @@ generate_prfaq:
 
     **Internal Context:** {internal_context}
 
+    **Business Context:** {business_context}
+
     ## Process
 
     1. **Load the style guide first.** Call the style_guide_loader tool
@@ -174,9 +227,17 @@ generate_prfaq:
        internal FAQ risk question and in the appendix_gaps. Do not write
        around them. Do not pretend they don't exist.
 
-    4. **Draft the PRFAQ** in the structure below.
+    4. **Use business context.** If business_context was provided in the
+       original input, reference it in the Internal FAQ section when
+       answering "Why now?" and "What's the expected impact?" Ground the
+       answers in real current-state numbers, not just aspirational targets
+       from the Goals field. The difference between current state
+       (business_context) and target state (Goals/Success Metrics) IS the
+       impact story.
 
-    5. **Return as a JSON object matching the PRFAQOutput schema.** Inline
+    5. **Draft the PRFAQ** in the structure below.
+
+    6. **Return as a JSON object matching the PRFAQOutput schema.** Inline
        `[source name](url)` citations belong inside text fields wherever a
        factual claim is made. Pydantic does not strip them.
 
@@ -328,11 +389,18 @@ generate_brd_chained:
        gaps_and_limitations is non-empty OR the PRFAQ's appendix_gaps is
        non-empty, surface them in the risk section. Do not paper over them.
 
-    6. **Enforce traceability.** Every functional requirement must
+    6. **Use business context.** If business_context was provided in the
+       original input, reference it in the Success Metrics section as
+       baseline values. Each success metric should show: current state
+       (from business_context) → target state (from Success Metrics input)
+       → measurement method. This makes the BRD's success criteria
+       measurable against a real starting point.
+
+    7. **Enforce traceability.** Every functional requirement must
        reference at least one user story ID. Every user story must
        reference a research finding or PRFAQ section in its source field.
 
-    7. **Return as a JSON object matching the BRDOutput schema.**
+    8. **Return as a JSON object matching the BRDOutput schema.**
 
     ## BRD Structure (12 sections)
 
@@ -528,11 +596,18 @@ generate_brd_standalone:
     6. **Honor gaps.** If the PRFAQ surfaces open gaps or risks,
        carry them into the BRD risk section.
 
-    7. **Enforce traceability.** Every functional requirement must
+    7. **Use business context.** If business_context was provided in the
+       original input, reference it in the Success Metrics section as
+       baseline values. Each success metric should show: current state
+       (from business_context) → target state (from Success Metrics input)
+       → measurement method. This makes the BRD's success criteria
+       measurable against a real starting point.
+
+    8. **Enforce traceability.** Every functional requirement must
        reference at least one user story ID. Every user story must
        reference a research finding or PRFAQ section in its source field.
 
-    8. **Return as a JSON object matching the BRDOutput schema.**
+    9. **Return as a JSON object matching the BRDOutput schema.**
 
     ## BRD Structure (12 sections)
 

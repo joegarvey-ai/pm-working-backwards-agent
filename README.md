@@ -21,6 +21,18 @@ flowchart LR
 
 You write a short problem statement. The agents do the research, write the Working Backwards document, translate it into requirements, and produce a build spec your engineers (or coding agent) can run with. You stay in the loop at every handoff.
 
+## What This System Is Not
+
+This system does not replace your existing tools:
+
+- **Not a replacement for Jira or Linear.** It produces requirements, not tickets. You take the BRD's user stories and create tickets in your project management tool.
+- **Not a replacement for Confluence or Notion.** It generates documents (PRFAQ, BRD) that you publish to your wiki. It references your existing docs rather than duplicating them.
+- **Not a replacement for Figma or design tools.** The build spec describes what to build, not how it should look. Design happens alongside or after the BRD.
+- **Not a replacement for your coding IDE.** Agent 3 produces a build spec that you load into Kiro, Claude Code, Cursor, or Lovable. The coding happens in your tool of choice.
+- **Not a replacement for PM judgment.** Every artifact has a human review checkpoint. The system accelerates your first draft — you own the final version.
+
+This system is the connective layer between research and execution. It takes a product problem and produces the artifacts that bridge the gap between "we should build this" and "here's exactly what to build and why."
+
 ## Quick start
 
 Prerequisites: Python 3.11+, [uv](https://github.com/astral-sh/uv), an Anthropic API key, a Tavily API key.

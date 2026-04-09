@@ -26,6 +26,8 @@ known_constraints: >
 
 internal_context: ""
 
+business_context: "Current event registration conversion rate is 8% from page visitors. Monthly active users on the developer portal: 12,400. Support ticket volume for event-related issues: ~45/month. Documentation satisfaction score (Qualtrics): 3.2/5. No existing dynamic content personalization — all users see the same page regardless of registration status."
+
 # Optional: Where to publish the approved research brief.
 # Set to any local directory path. Examples:
 #   "~/Desktop/research_briefs"

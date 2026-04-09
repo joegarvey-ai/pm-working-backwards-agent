@@ -47,7 +47,7 @@ from pm_agent_system.utils import (
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 REQUIRED_FIELDS = ["feature_summary", "goals", "timing", "user_summary"]
-ENCOURAGED_FIELDS = ["success_metrics", "known_constraints", "internal_context"]
+ENCOURAGED_FIELDS = ["success_metrics", "known_constraints", "internal_context", "business_context"]
 OPTIONAL_FIELDS = ["publish_destination"]
 
 
@@ -302,8 +302,9 @@ def cmd_research(args: argparse.Namespace) -> None:
 
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
 
+    skip = getattr(args, "skip_validation", False)
     try:
-        result = PmAgentSystem().crew().kickoff(inputs=crew_inputs)
+        result = PmAgentSystem().research_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
     except Exception as e:
         print(f"\nError running crew: {e}")
         sys.exit(1)
@@ -342,8 +343,9 @@ def cmd_generate(args: argparse.Namespace) -> None:
 
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
 
+    skip = getattr(args, "skip_validation", False)
     try:
-        result = PmAgentSystem().research_and_generate_crew().kickoff(inputs=crew_inputs)
+        result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
     except Exception as e:
         print(f"\nError running crew: {e}")
         sys.exit(1)
@@ -449,8 +451,9 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     print(f"Target tool for build spec: {target_tool}")
     print("Human review checkpoints will pause after each agent.\n")
 
+    skip = getattr(args, "skip_validation", False)
     try:
-        result = PmAgentSystem().full_pipeline_crew().kickoff(inputs=crew_inputs)
+        result = PmAgentSystem().full_pipeline_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
     except Exception as e:
         print(f"\nError running crew: {e}")
         sys.exit(1)
@@ -698,12 +701,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_research = sub.add_parser("research", help="Run Agent 1 only (research brief)")
     p_research.add_argument("input_file", help="Path to YAML or JSON input file")
+    p_research.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
     p_research.set_defaults(func=cmd_research)
 
     p_generate = sub.add_parser(
         "generate", help="Run Agent 1 then Agent 2 to produce a PRFAQ v1.0"
     )
     p_generate.add_argument("input_file", help="Path to YAML or JSON input file")
+    p_generate.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
     p_generate.set_defaults(func=cmd_generate)
 
     p_revise = sub.add_parser("revise", help="Run Agent 2 only to revise an existing PRFAQ")
@@ -723,6 +728,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run all three agents end-to-end (research → PRFAQ → BRD → build spec)",
     )
     p_full.add_argument("input_file", help="Path to YAML or JSON input file")
+    p_full.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
     p_full.add_argument(
         "--target-tool",
         choices=VALID_TARGET_TOOLS,
@@ -826,4 +832,5 @@ def _load_default_inputs() -> dict:
         "success_metrics": "Not provided.",
         "known_constraints": "Not provided.",
         "internal_context": "Not provided.",
+        "business_context": "Not provided.",
     }
