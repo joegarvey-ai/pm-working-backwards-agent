@@ -2,6 +2,19 @@
 
 This guide assumes you have never opened a terminal before. If you have, skim it. If you haven't, follow it line by line. It takes about 30 minutes.
 
+## What it costs
+
+This system calls the Anthropic API (Claude) and the Tavily API. Both charge per use.
+
+| Command | Typical cost | Time |
+|---|---|---|
+| `research` (Agent 1 only) | ~$0.20 | 2-3 minutes |
+| `generate` (research + PRFAQ) | ~$0.50-1.00 | 3-5 minutes |
+| `full-pipeline` (all agents) | ~$1-3 | 5-10 minutes |
+| `revise` or `revise-brd` | ~$0.30-0.50 | 1-2 minutes |
+
+Tavily's free tier includes 1,000 searches/month. A typical full-pipeline run uses 15-30 searches. Anthropic requires a payment method on file; most PM workflows cost under $5/day.
+
 ## What you'll need before you start
 
 - A Mac, Linux machine, or Windows machine with WSL (Windows Subsystem for Linux).
