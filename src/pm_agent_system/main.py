@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import logging
 import os
 import re
 import shutil
@@ -37,6 +38,8 @@ from pm_agent_system.models import (
     ResearchOutput,
 )
 from pm_agent_system.utils import (
+    export_jira_csv,
+    export_linear_markdown,
     formatted_spec_extension,
     render_brd_to_markdown,
     render_build_spec_to_markdown,
@@ -45,6 +48,8 @@ from pm_agent_system.utils import (
 )
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = ["feature_summary", "goals", "timing", "user_summary"]
 ENCOURAGED_FIELDS = ["success_metrics", "known_constraints", "internal_context", "business_context"]
@@ -169,7 +174,8 @@ def enforce_retention_policy(output_dir: Path, archive_after_days: int = 30) -> 
                 target = archive / f"{stem}_{int(entry.stat().st_mtime)}{suffix}"
             entry.rename(target)
             moved += 1
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to archive %s: %s", entry.name, exc)
             continue
     return moved
 
@@ -225,6 +231,18 @@ def save_build_spec(reference_md: str, formatted: str, label: str, target_tool: 
     reference_path.write_text(reference_md, encoding="utf-8")
     spec_path.write_text(formatted, encoding="utf-8")
     return reference_path, spec_path
+
+
+def save_brd_exports(brd: BRDOutput, label: str) -> None:
+    """Write Jira CSV and Linear markdown exports alongside the BRD."""
+    slug = _slugify(label) or "brd"
+    out = _output_dir()
+    jira_path = out / f"brd_{slug}_jira_import.csv"
+    linear_path = out / f"brd_{slug}_linear_import.md"
+    jira_path.write_text(export_jira_csv(brd), encoding="utf-8")
+    linear_path.write_text(export_linear_markdown(brd), encoding="utf-8")
+    print(f"Jira import CSV: {jira_path}")
+    print(f"Linear import MD: {linear_path}")
 
 
 # ---------- Pydantic extraction ----------
@@ -488,6 +506,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                 brd_md = render_brd_to_markdown(task_output.pydantic, slug=slug)
                 brd_path = save_brd(brd_md, label, brd_version)
                 print(f"BRD saved to: {brd_path}")
+                save_brd_exports(task_output.pydantic, label)
 
     reference_md = render_build_spec_to_markdown(spec, slug=slug)
     ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
@@ -565,6 +584,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
                 brd_md = render_brd_to_markdown(task_output.pydantic, slug=slug)
                 brd_path = save_brd(brd_md, label, brd_version)
                 print(f"BRD saved to: {brd_path}")
+                save_brd_exports(task_output.pydantic, label)
 
     spec = extract_pydantic_output(result, CodingPromptOutput)
     if spec is None:
@@ -668,6 +688,25 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
     markdown = render_brd_to_markdown(brd, slug=label)
     working_copy = save_brd(markdown, label, output_version)
     print(f"\nRevision complete. Working copy saved to: {working_copy}")
+    save_brd_exports(brd, label)
+
+
+# ---------- Subcommand: diff ----------
+
+
+def cmd_diff(args: argparse.Namespace) -> None:
+    """Show section-level changes between two document versions."""
+    from pm_agent_system.utils.diff_versions import diff_markdown_versions
+
+    old = Path(args.old_path).expanduser().resolve()
+    new = Path(args.new_path).expanduser().resolve()
+    if not old.exists():
+        print(f"Error: File not found: {old}")
+        sys.exit(1)
+    if not new.exists():
+        print(f"Error: File not found: {new}")
+        sys.exit(1)
+    print(diff_markdown_versions(str(old), str(new)))
 
 
 # ---------- Argparse wiring ----------
@@ -799,6 +838,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("--list", action="store_true", help="List live and archived output files")
     p_clean.set_defaults(func=cmd_clean)
 
+    p_diff = sub.add_parser("diff", help="Compare two document versions section by section")
+    p_diff.add_argument("old_path", help="Path to the older version")
+    p_diff.add_argument("new_path", help="Path to the newer version")
+    p_diff.set_defaults(func=cmd_diff)
+
     return parser
 
 
@@ -807,7 +851,7 @@ def run():
     load_dotenv()
     parser = _build_parser()
     args = parser.parse_args()
-    if args.command != "clean":
+    if args.command not in ("clean", "diff"):
         enforce_retention_policy(_output_dir(), archive_after_days=_retention_days())
     args.func(args)
 
@@ -849,7 +893,7 @@ def test():
 
 def _load_default_inputs() -> dict:
     """Load the example input file for train/test commands."""
-    example_path = Path(__file__).parent.parent.parent / "input" / "example_input.yaml"
+    example_path = Path(__file__).parent.parent.parent / "examples" / "input.yaml"
     if example_path.exists():
         data = yaml.safe_load(example_path.read_text())
         data.pop("publish_destination", None)
