@@ -9,13 +9,20 @@ class UserStory(BaseModel):
     action: str
     outcome: str
     priority: str = Field(description="P0, P1, or P2")
-    source: str = Field(
+    origin: str = Field(
+        default="agent-generated",
         description=(
-            "Origin and traceability. One of: 'customer_input' (from PM's requirements file), "
-            "'agent-generated' (derived from PRFAQ/research), or 'reconciled' (PM requirement "
-            "modified to align with PRFAQ). May also reference a specific research finding or "
-            "PRFAQ section for traceability."
-        )
+            "One of: 'customer_input' (from PM's requirements file), "
+            "'agent-generated' (derived from PRFAQ/research), or 'reconciled' "
+            "(PM requirement modified to align with PRFAQ)"
+        ),
+    )
+    traceability: str = Field(
+        default="",
+        description=(
+            "Reference to a PRFAQ section, research finding, or PM constraint "
+            "that justifies this user story. E.g. 'PRFAQ FAQ #3', 'Research: competitor analysis'"
+        ),
     )
 
 
@@ -39,12 +46,19 @@ class FunctionalRequirement(BaseModel):
         default_factory=list,
         description="API contracts, data model schemas, integration snippets",
     )
-    source: str = Field(
+    origin: str = Field(
         default="agent-generated",
         description=(
-            "Origin: 'customer_input' (from PM's requirements file), "
+            "One of: 'customer_input' (from PM's requirements file), "
             "'agent-generated' (derived from PRFAQ/research), or 'reconciled' "
             "(PM requirement modified to align with PRFAQ)"
+        ),
+    )
+    traceability: str = Field(
+        default="",
+        description=(
+            "Reference to a PRFAQ section, research finding, or PM constraint "
+            "that justifies this requirement. E.g. 'PRFAQ FAQ #3', 'CR-005 (PM input)'"
         ),
     )
 

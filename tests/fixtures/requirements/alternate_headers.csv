@@ -1,0 +1,4 @@
+Requirement Name,Detail,Importance,ID,Theme
+Login flow,Users authenticate with SSO,Must have,REQ-001,Auth
+Audit log,Track all user actions,High,REQ-002,Compliance
+Notifications,Email alerts for key events,Could have,REQ-003,Engagement

@@ -1,0 +1,5 @@
+Title,Description,Priority,Category,Notes
+User login,Users can log in with email and password,P0,Authentication,MVP feature
+Password reset,Users can reset their password via email,P1,Authentication,
+Dashboard view,Users see a summary dashboard after login,P1,UI,Include charts
+Export data,Users can export their data as CSV,P2,Data,Nice to have

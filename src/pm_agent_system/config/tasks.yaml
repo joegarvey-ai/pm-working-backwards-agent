@@ -458,7 +458,7 @@ generate_brd_chained:
     3. FILL GAPS — identify requirements implied by the PRFAQ customer
        experience narrative or internal FAQ answers that the PM's
        requirements file does not cover. Generate these as new requirements,
-       clearly marked with source: "agent-generated (from PRFAQ section X)"
+       clearly marked with origin: "agent-generated" and traceability: "PRFAQ section X"
        so the PM can distinguish them from their own inputs.
 
     4. DO NOT override the PM's priority assignments. If a PM marked
@@ -467,10 +467,12 @@ generate_brd_chained:
        the requirement's rationale field but do not change the priority.
 
     5. In the BRD output, every user story and functional requirement should
-       have a `source` field indicating whether it came from
+       have an `origin` field indicating whether it came from
        "customer_input" (the PM's file), "agent-generated" (derived from
        PRFAQ/research), or "reconciled" (PM's requirement that was modified
-       to align with PRFAQ).
+       to align with PRFAQ). Use the `traceability` field to reference the
+       specific PRFAQ section, research finding, or PM constraint (e.g.
+       "PRFAQ FAQ #3", "CR-005 (PM input)").
 
     If NO requirements file is provided (requirements_path is empty),
     generate all user stories and functional requirements from the PRFAQ
@@ -698,7 +700,7 @@ generate_brd_standalone:
     3. FILL GAPS — identify requirements implied by the PRFAQ customer
        experience narrative or internal FAQ answers that the PM's
        requirements file does not cover. Generate these as new requirements,
-       clearly marked with source: "agent-generated (from PRFAQ section X)"
+       clearly marked with origin: "agent-generated" and traceability: "PRFAQ section X"
        so the PM can distinguish them from their own inputs.
 
     4. DO NOT override the PM's priority assignments. If a PM marked
@@ -707,10 +709,12 @@ generate_brd_standalone:
        the requirement's rationale field but do not change the priority.
 
     5. In the BRD output, every user story and functional requirement should
-       have a `source` field indicating whether it came from
+       have an `origin` field indicating whether it came from
        "customer_input" (the PM's file), "agent-generated" (derived from
        PRFAQ/research), or "reconciled" (PM's requirement that was modified
-       to align with PRFAQ).
+       to align with PRFAQ). Use the `traceability` field to reference the
+       specific PRFAQ section, research finding, or PM constraint (e.g.
+       "PRFAQ FAQ #3", "CR-005 (PM input)").
 
     If NO requirements file is provided (requirements_path is empty),
     generate all user stories and functional requirements from the PRFAQ

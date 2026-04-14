@@ -42,10 +42,10 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
 
     lines += ["## 4. User Stories", ""]
     rows = [
-        [us.id, us.persona, us.action, us.outcome, us.priority, us.source]
+        [us.id, us.persona, us.action, us.outcome, us.priority, us.origin]
         for us in output.user_stories
     ]
-    lines += _table(["ID", "Persona", "Action", "Outcome", "Priority", "Source"], rows)
+    lines += _table(["ID", "Persona", "Action", "Outcome", "Priority", "Origin"], rows)
     lines.append("")
 
     lines += ["## 5. Functional Requirements", ""]
@@ -54,7 +54,9 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
         lines.append("")
         lines.append(f"**Rationale:** {fr.rationale}")
         lines.append("")
-        lines.append(f"**Source:** {fr.source}")
+        lines.append(f"**Origin:** {fr.origin}")
+        lines.append("")
+        lines.append(f"**Traceability:** {fr.traceability}")
         lines.append("")
         lines.append(f"**Related user stories:** {', '.join(fr.related_user_stories)}")
         lines.append("")
