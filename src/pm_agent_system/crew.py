@@ -3,6 +3,8 @@ from crewai.project import CrewBase, agent, crew, task
 
 from pm_agent_system.models import BRDOutput, CodingPromptOutput, PRFAQOutput, ResearchOutput
 from pm_agent_system.tools import (
+    AWSDocsReadTool,
+    AWSDocsSearchTool,
     AWSPricingTool,
     CompetitiveIntelTool,
     DovetailSearchTool,
@@ -73,6 +75,8 @@ class PmAgentSystem:
             tools=[
                 TavilySearchTool(),
                 AWSPricingTool(),
+                AWSDocsSearchTool(),
+                AWSDocsReadTool(),
                 FileReaderTool(),
                 RequirementsReaderTool(),
                 StyleGuideLoaderTool(),
