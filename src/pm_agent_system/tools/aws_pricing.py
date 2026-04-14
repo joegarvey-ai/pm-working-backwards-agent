@@ -48,6 +48,24 @@ SUPPORTED_SERVICES = (
 
 MAX_PRODUCT_FAMILIES = 10
 
+# Reference: common product family values for targeted lookups.
+# Use these with the product_family parameter to narrow results for
+# large services like EC2 or RDS.
+COMMON_PRODUCT_FAMILIES = {
+    "AWSLambda": ["Serverless", "AWS Lambda Provisioned Concurrency", "Lambda Edge"],
+    "AmazonDynamoDB": [
+        "Amazon DynamoDB PayPerRequest Throughput",
+        "Database Storage",
+        "Amazon DynamoDB Reserved Capacity",
+    ],
+    "AmazonEC2": ["Compute Instance", "Storage", "Data Transfer"],
+    "AmazonRDS": ["Database Instance", "Database Storage", "Provisioned IOPS"],
+    "AmazonS3": ["Storage", "Data Transfer", "API Requests"],
+    "AmazonCloudFront": ["Data Transfer", "Request"],
+    "AmazonCognito": ["MAU"],
+    "AmazonApiGateway": ["API Calls"],
+}
+
 
 def _resolve_service_code(name: str) -> str:
     """Resolve a natural name like 'lambda' to an AWS service code."""
@@ -129,20 +147,30 @@ class AWSPricingTool(BaseTool):
     name: str = "aws_pricing_lookup"
     description: str = (
         "Looks up current AWS service pricing from the official AWS Price List API. "
-        "Use this when flagging cost-relevant decisions in the BRD. "
-        "Input: an AWS service name (e.g., 'DynamoDB', 'Lambda', 'S3'). "
-        "Returns: pricing dimensions, tiers, and per-unit costs for the specified service in us-east-1."
+        "Input: an AWS service name (e.g., 'lambda', 'dynamodb', 's3'). "
+        "Optional: product_family to narrow results (e.g., 'Serverless' for Lambda on-demand, "
+        "'Amazon DynamoDB PayPerRequest Throughput' for DynamoDB on-demand, "
+        "'Compute Instance' for EC2 instances, 'Database Instance' for RDS). "
+        "Returns: pricing tiers and per-unit costs for the specified service in the given region."
     )
 
     region: str = Field(default="us-east-1", exclude=True)
 
-    def _run(self, service_code: str, region: Optional[str] = None) -> str:
+    def _run(
+        self,
+        service_code: str,
+        region: Optional[str] = None,
+        product_family: str = "",
+    ) -> str:
         """Query AWS Price List API for a service's pricing.
 
         Args:
             service_code: AWS service name (natural name like 'Lambda' or
                 API code like 'AWSLambda').
             region: AWS region to filter pricing for. Defaults to us-east-1.
+            product_family: Optional product family to narrow results
+                (e.g., 'Serverless', 'Compute Instance', 'Database Storage').
+                See COMMON_PRODUCT_FAMILIES for reference values.
         """
         target_region = region or self.region
         resolved = _resolve_service_code(service_code)
@@ -157,15 +185,24 @@ class AWSPricingTool(BaseTool):
             )
 
         try:
-            response = client.get_products(
-                ServiceCode=resolved,
-                Filters=[
+            filters = [
+                {
+                    "Type": "TERM_MATCH",
+                    "Field": "regionCode",
+                    "Value": target_region,
+                },
+            ]
+            if product_family:
+                filters.append(
                     {
                         "Type": "TERM_MATCH",
-                        "Field": "regionCode",
-                        "Value": target_region,
-                    },
-                ],
+                        "Field": "productFamily",
+                        "Value": product_family,
+                    }
+                )
+            response = client.get_products(
+                ServiceCode=resolved,
+                Filters=filters,
                 MaxResults=100,
             )
         except client.exceptions.NotFoundException:

@@ -297,6 +297,16 @@ generate_prfaq:
       with inline `[source](url)` citation.
     - **appendix_competitor_table:** Each competitor as a dict with at
       least: name, positioning, key_features, pricing (if known), source.
+      When building the appendix_competitor_table, include review
+      platform ratings if available in the research output. For each
+      competitor, check if review_data exists and add these keys to the
+      competitor dict:
+      - "G2 Rating": the rating string from G2 (e.g., "4.7/5 (5,200+
+        reviews)") — or leave blank if no G2 data
+      - "Capterra Rating": the rating string from Capterra — or leave
+        blank if no Capterra data
+      These columns help stakeholders see real user sentiment alongside
+      feature comparisons.
     - **appendix_customer_quotes:** Direct quotes from research, preserved
       with attribution and source.
     - **appendix_gaps:** Open questions, unvalidated assumptions, anything
@@ -353,6 +363,12 @@ revise_prfaq:
     5. **Update ONLY the sections the PM identified.** Preserve every
        other section exactly as it appeared in v1.0 (or whatever the
        current version is). Do not "improve" untouched sections.
+
+       If the appendix_competitor_table is being revised and the
+       research output included review_data for competitors, add
+       "G2 Rating" and "Capterra Rating" keys to each competitor dict
+       (e.g., "4.7/5 (5,200+ reviews)"). Leave blank if no data exists
+       for that platform.
 
     6. **Maintain inline citations** from the original where they still
        apply. If revision context contradicts a cited claim, flag the
@@ -417,6 +433,13 @@ generate_brd_chained:
          but risks throttling during spikes.
        - Reference: AWS DynamoDB Pricing
          (https://aws.amazon.com/dynamodb/pricing/)
+
+       When looking up pricing, use the product_family parameter to
+       narrow results for large services. For example, use
+       product_family="Serverless" for Lambda on-demand pricing, or
+       product_family="Compute Instance" for EC2 instance pricing.
+       This avoids overwhelming the cost flag with irrelevant pricing
+       dimensions.
 
        If the aws_pricing_lookup tool fails or returns unexpected
        results, fall back to the tavily_search tool to find pricing
@@ -681,9 +704,12 @@ generate_brd_standalone:
        Use the aws_pricing_lookup tool to get exact current pricing for
        each AWS service involved in the decision. Include specific
        per-unit prices in the cost flag. Store the raw pricing summary
-       in the pricing_data field. If aws_pricing_lookup fails, fall
-       back to tavily_search and note that pricing should be verified
-       on the AWS pricing page.
+       in the pricing_data field. When looking up pricing, use the
+       product_family parameter to narrow results for large services
+       (e.g., product_family="Serverless" for Lambda on-demand,
+       product_family="Compute Instance" for EC2). If aws_pricing_lookup
+       fails, fall back to tavily_search and note that pricing should
+       be verified on the AWS pricing page.
 
     6. **Honor gaps.** If the PRFAQ surfaces open gaps or risks,
        carry them into the BRD risk section.
