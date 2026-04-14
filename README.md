@@ -1,4 +1,4 @@
-# PM Working Backwards Agent
+# Working Backwards Agent for Product Managers
 
 An open-source multi-agent AI system that guides product managers from a rough problem statement through stakeholder-ready research, a Working Backwards PRFAQ, a BRD, and an engineer-ready build spec. Built on [CrewAI](https://www.crewai.com/) and Claude.
 
