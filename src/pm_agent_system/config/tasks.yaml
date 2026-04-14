@@ -434,6 +434,48 @@ generate_brd_chained:
     12. **Version history** — start with v1.0, today's date, author
         "Agent 3", changes "Initial draft generated from approved PRFAQ."
 
+    ## Customer Requirements Handling (when requirements file is provided)
+
+    If the PM provides a customer requirements file via --requirements-path
+    (passed as {requirements_path}), use the requirements_reader tool to
+    parse it. These pre-existing requirements represent what the PM has
+    already gathered from customers, interviews, or an existing backlog.
+
+    Your job is to RECONCILE these requirements with the PRFAQ, not blindly
+    include them:
+
+    1. KEEP requirements that align with the approved PRFAQ. Carry forward
+       the PM's exact title and description wording. Preserve their priority
+       (P0-P4). Assign a user story ID (US-xxx) or functional requirement
+       ID (FR-xxx) as appropriate.
+
+    2. FLAG requirements that contradict the PRFAQ or have no traceability
+       to the research. Present these to the PM during human review with a
+       clear note: "[CR-xxx] does not appear in the approved PRFAQ or
+       research output. Recommend confirming with stakeholders before
+       including in the BRD."
+
+    3. FILL GAPS — identify requirements implied by the PRFAQ customer
+       experience narrative or internal FAQ answers that the PM's
+       requirements file does not cover. Generate these as new requirements,
+       clearly marked with source: "agent-generated (from PRFAQ section X)"
+       so the PM can distinguish them from their own inputs.
+
+    4. DO NOT override the PM's priority assignments. If a PM marked
+       something P0, it stays P0 even if the research suggests it's less
+       critical. The PM owns prioritization. If you disagree, note it in
+       the requirement's rationale field but do not change the priority.
+
+    5. In the BRD output, every user story and functional requirement should
+       have a `source` field indicating whether it came from
+       "customer_input" (the PM's file), "agent-generated" (derived from
+       PRFAQ/research), or "reconciled" (PM's requirement that was modified
+       to align with PRFAQ).
+
+    If NO requirements file is provided (requirements_path is empty),
+    generate all user stories and functional requirements from the PRFAQ
+    and research as you do today. This feature is purely additive.
+
   expected_output: >
     A BRDOutput JSON object with all required fields populated. User
     stories >= 3 with traceability. Functional requirements >= 3 with
@@ -441,6 +483,9 @@ generate_brd_chained:
     least one Mermaid diagram each in proposed_solution_overview and
     technical_context_and_dependencies. Cost flags include real
     reference URLs. Risks >= 2. Version history starts at 1.0.
+    If a requirements file was provided, user stories and functional
+    requirements include source fields indicating origin (customer_input,
+    agent-generated, or reconciled).
 
   agent: brd_agent
   human_input: true
@@ -629,9 +674,54 @@ generate_brd_standalone:
     11. **Timeline and milestones**.
     12. **Version history** — start with v1.0, today's date, author "Agent 3".
 
+    ## Customer Requirements Handling (when requirements file is provided)
+
+    If the PM provides a customer requirements file via --requirements-path
+    (passed as {requirements_path}), use the requirements_reader tool to
+    parse it. These pre-existing requirements represent what the PM has
+    already gathered from customers, interviews, or an existing backlog.
+
+    Your job is to RECONCILE these requirements with the PRFAQ, not blindly
+    include them:
+
+    1. KEEP requirements that align with the approved PRFAQ. Carry forward
+       the PM's exact title and description wording. Preserve their priority
+       (P0-P4). Assign a user story ID (US-xxx) or functional requirement
+       ID (FR-xxx) as appropriate.
+
+    2. FLAG requirements that contradict the PRFAQ or have no traceability
+       to the research. Present these to the PM during human review with a
+       clear note: "[CR-xxx] does not appear in the approved PRFAQ or
+       research output. Recommend confirming with stakeholders before
+       including in the BRD."
+
+    3. FILL GAPS — identify requirements implied by the PRFAQ customer
+       experience narrative or internal FAQ answers that the PM's
+       requirements file does not cover. Generate these as new requirements,
+       clearly marked with source: "agent-generated (from PRFAQ section X)"
+       so the PM can distinguish them from their own inputs.
+
+    4. DO NOT override the PM's priority assignments. If a PM marked
+       something P0, it stays P0 even if the research suggests it's less
+       critical. The PM owns prioritization. If you disagree, note it in
+       the requirement's rationale field but do not change the priority.
+
+    5. In the BRD output, every user story and functional requirement should
+       have a `source` field indicating whether it came from
+       "customer_input" (the PM's file), "agent-generated" (derived from
+       PRFAQ/research), or "reconciled" (PM's requirement that was modified
+       to align with PRFAQ).
+
+    If NO requirements file is provided (requirements_path is empty),
+    generate all user stories and functional requirements from the PRFAQ
+    and research as you do today. This feature is purely additive.
+
   expected_output: >
     A BRDOutput JSON object with all required fields populated. Same
     quality bar as the chained version. Version history starts at 1.0.
+    If a requirements file was provided, user stories and functional
+    requirements include source fields indicating origin (customer_input,
+    agent-generated, or reconciled).
 
   agent: brd_agent
   human_input: true

@@ -1898,6 +1898,7 @@ source = { editable = "." }
 dependencies = [
     { name = "crewai", extra = ["anthropic", "tools"] },
     { name = "httpx" },
+    { name = "openpyxl" },
     { name = "pdfplumber" },
     { name = "python-docx" },
     { name = "python-dotenv" },
@@ -1909,6 +1910,7 @@ dependencies = [
 requires-dist = [
     { name = "crewai", extras = ["anthropic", "tools"], specifier = "==1.13.0" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "openpyxl", specifier = ">=3.1.0" },
     { name = "pdfplumber", specifier = ">=0.11.0" },
     { name = "python-docx", specifier = ">=1.1.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },

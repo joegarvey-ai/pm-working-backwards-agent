@@ -75,6 +75,8 @@ This system runs in multiple environments. Choose the one that fits your workflo
 | Turn an approved PRFAQ into an engineer-ready BRD | `uv run pm_agent_system brd input.yaml --prfaq-path prfaq_v1.2.md` |
 | Generate a Kiro build spec from a BRD | `uv run pm_agent_system build-spec --brd-path brd_v1.0.md --target-tool kiro` |
 | Update a BRD after engineering feedback | `uv run pm_agent_system revise-brd --brd-path brd_v1.0.md --context-text "FR-003 needs a GSI"` |
+| I have my own research and just need a PRFAQ | `uv run pm_agent_system generate input.yaml --research-path research.md` |
+| I have an approved PRFAQ and my own requirements | `uv run pm_agent_system brd input.yaml --prfaq-path prfaq.md --requirements-path requirements.csv` |
 | Skip the assumption-challenge step | Add `--skip-validation` to any research/generate/full-pipeline command |
 
 Each command pauses for your review before producing the next artifact. See the [CLI Commands](#cli-commands) section below for full details, or the [Platform Support](#platform-support) section for non-CLI options.

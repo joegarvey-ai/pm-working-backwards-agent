@@ -438,16 +438,27 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         print(f"Error: --target-tool must be one of {VALID_TARGET_TOOLS}")
         sys.exit(1)
 
+    requirements_path_arg = ""
+    if getattr(args, "requirements_path", None):
+        reqp = Path(args.requirements_path).expanduser().resolve()
+        if not reqp.exists():
+            print(f"Error: Requirements file not found: {reqp}")
+            sys.exit(1)
+        requirements_path_arg = str(reqp)
+
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
     # Empty path placeholders so the BRD/build-spec tasks don't break templating.
     crew_inputs.update({
         "prfaq_path": "",
         "research_path": "",
+        "requirements_path": requirements_path_arg,
         "brd_path": "",
         "target_tool": target_tool,
     })
 
     print(f"\nFull pipeline starting for: {inputs['feature_summary'][:80]}...")
+    if requirements_path_arg:
+        print(f"Customer requirements: {Path(requirements_path_arg).name}")
     print(f"Target tool for build spec: {target_tool}")
     print("Human review checkpoints will pause after each agent.\n")
 
@@ -509,6 +520,14 @@ def cmd_brd(args: argparse.Namespace) -> None:
             sys.exit(1)
         research_path_arg = str(rp)
 
+    requirements_path_arg = ""
+    if args.requirements_path:
+        reqp = Path(args.requirements_path).expanduser().resolve()
+        if not reqp.exists():
+            print(f"Error: Requirements file not found: {reqp}")
+            sys.exit(1)
+        requirements_path_arg = str(reqp)
+
     target_tool = (args.target_tool or os.getenv("DEFAULT_TARGET_TOOL", "kiro")).strip()
     if target_tool not in VALID_TARGET_TOOLS:
         print(f"Error: --target-tool must be one of {VALID_TARGET_TOOLS}")
@@ -518,11 +537,14 @@ def cmd_brd(args: argparse.Namespace) -> None:
     crew_inputs.update({
         "prfaq_path": str(prfaq_path),
         "research_path": research_path_arg,
+        "requirements_path": requirements_path_arg,
         "brd_path": "",
         "target_tool": target_tool,
     })
 
     print(f"\nGenerating BRD + build spec from PRFAQ: {prfaq_path.name}")
+    if requirements_path_arg:
+        print(f"Customer requirements: {Path(requirements_path_arg).name}")
     print(f"Target tool: {target_tool}\n")
 
     try:
@@ -734,6 +756,10 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=VALID_TARGET_TOOLS,
         help="Target coding tool for the build spec (defaults to DEFAULT_TARGET_TOOL or kiro)",
     )
+    p_full.add_argument(
+        "--requirements-path",
+        help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
+    )
     p_full.set_defaults(func=cmd_full_pipeline)
 
     p_brd = sub.add_parser(
@@ -743,6 +769,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_brd.add_argument("input_file", help="Path to original YAML/JSON input (for context)")
     p_brd.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
     p_brd.add_argument("--research-path", help="Optional path to research brief markdown")
+    p_brd.add_argument(
+        "--requirements-path",
+        help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
+    )
     p_brd.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
     p_brd.set_defaults(func=cmd_brd)
 
