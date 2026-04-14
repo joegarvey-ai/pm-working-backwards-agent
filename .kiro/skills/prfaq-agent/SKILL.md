@@ -8,9 +8,26 @@ description: Write or revise a Working Backwards document (PRFAQ) for stakeholde
 ## What This Skill Does
 Transforms approved research into a Working Backwards document (PRFAQ) that stakeholders can review for go/no-go decisions. Supports both initial generation and iterative revision based on stakeholder feedback.
 
+## Key Files
+- Agent prompt: #[[file:src/pm_agent_system/config/agents.yaml]] (prfaq_agent section)
+- Task prompts: #[[file:src/pm_agent_system/config/tasks.yaml]] (generate_prfaq and revise_prfaq sections)
+- Output schema: #[[file:src/pm_agent_system/models/prfaq_output.py]]
+- Renderer: #[[file:src/pm_agent_system/utils/render_prfaq.py]]
+- Style guide: #[[file:samples/style-guide-sample.md]]
+
 ## Modes
 - **Generate**: Create PRFAQ v1.0 from research findings
-- **Revise**: Update specific sections based on meeting notes, email feedback, or stakeholder comments. Preserves untouched sections.
+- **Revise**: Update specific sections based on stakeholder feedback. Preserves untouched sections.
+
+## Running via CLI
+```
+# Generate (runs research first, then PRFAQ)
+uv run pm_agent_system generate examples/input.yaml
+
+# Revise an existing PRFAQ
+uv run pm_agent_system revise --prfaq-path output/prfaq_foo_v1.0.md --context-text "Legal wants GDPR language"
+uv run pm_agent_system revise --prfaq-path output/prfaq_foo_v1.0.md --context-path notes/feedback.md
+```
 
 ## Output Structure
 1. Press Release (future-state, 300-500 words, includes customer quote from research)
@@ -25,10 +42,10 @@ Transforms approved research into a Working Backwards document (PRFAQ) that stak
 - No em dashes, no contrast hooks, no rhetorical question openers
 - Claims backed by research data with citations
 - Inverted pyramid structure
-- Customer experience narrative must be specific - no "seamless experience" or "intuitive interface"
+- Customer experience narrative must be specific, not vague
 
 ## For Revision Mode
 - Read the current PRFAQ version and the feedback/notes provided
 - Confirm which sections to revise before rewriting
-- Update ONLY the specified sections - preserve everything else exactly
+- Update ONLY the specified sections
 - Bump the version number

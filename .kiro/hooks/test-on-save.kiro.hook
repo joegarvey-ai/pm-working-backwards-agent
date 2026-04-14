@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Run Tests on Python Save",
+  "description": "Runs pytest after any Python source file is saved to catch regressions early",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.py"
+    ]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "uv run pytest tests/ -x -q"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Style Guard on Write",
+  "description": "Before writing any YAML or Markdown file, reminds the agent to check for banned words, em dashes, contrast hooks, and other style violations defined in the project conventions",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "write"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Before completing this write, verify the content does NOT contain: (1) any banned words (robust, comprehensive, powerful, cutting-edge, transformative, game-changing, revolutionary, best-in-class, seamless, incredibly, significantly, essentially, very, really, quite, extremely, strong, leverage, synergies, drive alignment, holistic, unlock, supercharge), (2) em dashes used as punctuation, (3) contrast hooks (\"It's not X — it's Y\"), (4) rhetorical questions as section openers, (5) throat-clearing openers (\"In today's landscape...\"). If any violations are found, fix them before writing."
+  }
+}
