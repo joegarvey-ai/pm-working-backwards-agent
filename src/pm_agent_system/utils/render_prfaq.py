@@ -69,7 +69,19 @@ def render_prfaq_to_markdown(output: PRFAQOutput, slug: str = "") -> str:
     lines.append("### B. Competitor Comparison")
     lines.append("")
     if output.appendix_competitor_table:
-        headers = list(output.appendix_competitor_table[0].keys())
+        # Determine base headers from the competitor table dicts.
+        base_headers = list(output.appendix_competitor_table[0].keys())
+
+        # Add G2 and Capterra rating columns if review data is available
+        # in the research output (carried through as extra keys by Agent 2).
+        rating_headers = []
+        for h in ("G2 Rating", "Capterra Rating"):
+            if h not in base_headers:
+                # Check if any row has the key (Agent 2 may have added it).
+                if any(h in row for row in output.appendix_competitor_table):
+                    rating_headers.append(h)
+        headers = base_headers + rating_headers
+
         lines.append("| " + " | ".join(headers) + " |")
         lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
         for row in output.appendix_competitor_table:

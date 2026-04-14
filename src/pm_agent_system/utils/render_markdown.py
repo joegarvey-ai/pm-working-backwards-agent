@@ -37,6 +37,12 @@ def render_research_to_markdown(output: ResearchOutput) -> str:
         lines.append("")
         lines.append(comp.description)
         lines.append("")
+        if comp.review_data:
+            lines.append("**Review Ratings:**")
+            for rd in comp.review_data:
+                count_str = f" ({rd.review_count})" if rd.review_count else ""
+                lines.append(f"- {rd.platform}: {rd.rating}{count_str}")
+            lines.append("")
         if comp.strengths:
             lines.append("Strengths:")
             for s in comp.strengths:
@@ -46,6 +52,22 @@ def render_research_to_markdown(output: ResearchOutput) -> str:
             lines.append("Weaknesses:")
             for w in comp.weaknesses:
                 lines.append(f"- {w}")
+            lines.append("")
+        if comp.top_pros:
+            lines.append("**User Review Highlights — Pros:**")
+            for pro in comp.top_pros:
+                lines.append(f"- {pro}")
+            lines.append("")
+        if comp.top_cons:
+            lines.append("**User Review Highlights — Cons:**")
+            for con in comp.top_cons:
+                lines.append(f"- {con}")
+            lines.append("")
+        if comp.reviewer_roles:
+            lines.append(f"**Common Reviewer Roles:** {', '.join(comp.reviewer_roles)}")
+            lines.append("")
+        if comp.pricing_summary:
+            lines.append(f"**Pricing:** {comp.pricing_summary}")
             lines.append("")
         lines.append(f"Relevance: {comp.relevance}")
         lines.append("")

@@ -72,6 +72,24 @@ research_task:
        - Public customer quotes from reviews, forums, or analyst reports
        - Industry benchmarks with attribution
 
+       For each competitor identified, use the competitive_intelligence
+       tool to look up user review data from G2, Capterra, and
+       TrustRadius. Include the following in each competitor analysis:
+       - Overall ratings and review counts from review platforms
+       - Top pros and cons as reported by actual users (not marketing copy)
+       - Common reviewer roles (helps validate whether reviewers match
+         the target persona)
+       - Pricing summary if available
+
+       This review data supplements your web research. It represents
+       what real users actually think, not what the company claims.
+       When strengths or weaknesses from reviews contradict the
+       company's own positioning, note the discrepancy.
+
+       If a competitor has few or no reviews on these platforms, note
+       the limited data and rely on web research for that competitor's
+       analysis.
+
     3. **Customer evidence.** Use the Dovetail research tool to find:
        - Customer interview transcripts related to the problem
        - Usability findings and highlights
@@ -381,9 +399,31 @@ generate_brd_chained:
        Supabase, Firebase, Vercel, or other non-enterprise services
        unless the PM's constraints explicitly require them.
 
-    4. **Use Tavily** to find reference URLs for cost-flagged decisions
-       (AWS pricing pages, service limits, comparison docs). Do NOT
-       estimate dollar amounts. Flag the decision and link the reference.
+    4. **Use Tavily and AWS Pricing API** to find reference URLs and
+       exact pricing for cost-flagged decisions. When flagging
+       cost-relevant decisions, use the aws_pricing_lookup tool to get
+       exact current pricing for each AWS service involved in the
+       decision. Include the specific per-unit price in the cost flag
+       rather than vague language like "may be expensive."
+
+       Example of a GOOD cost flag with pricing data:
+       - Decision: DynamoDB on-demand mode vs. provisioned capacity
+       - Why it matters: On-demand costs $1.25/million write request
+         units vs. provisioned at $0.00065/WCU-hour. At 10M
+         writes/month, on-demand costs ~$12.50/month while provisioned
+         (sized for peak) could cost less but requires capacity planning.
+       - Tradeoff: On-demand is simpler (no capacity planning) but more
+         expensive at scale. Provisioned is cheaper at predictable load
+         but risks throttling during spikes.
+       - Reference: AWS DynamoDB Pricing
+         (https://aws.amazon.com/dynamodb/pricing/)
+
+       If the aws_pricing_lookup tool fails or returns unexpected
+       results, fall back to the tavily_search tool to find pricing
+       info, and note that pricing should be verified on the AWS
+       pricing page. Store the raw pricing summary from
+       aws_pricing_lookup in the pricing_data field of each CostFlag
+       for traceability.
 
     5. **Honor research gaps.** If the ResearchOutput's
        gaps_and_limitations is non-empty OR the PRFAQ's appendix_gaps is
@@ -637,8 +677,13 @@ generate_brd_standalone:
        Supabase, Firebase, Vercel, or other non-enterprise services
        unless the PM's constraints explicitly require them.
 
-    5. **Use Tavily** to find reference URLs for cost-flagged decisions.
-       Do NOT estimate dollar amounts.
+    5. **Use Tavily and AWS Pricing API** for cost-flagged decisions.
+       Use the aws_pricing_lookup tool to get exact current pricing for
+       each AWS service involved in the decision. Include specific
+       per-unit prices in the cost flag. Store the raw pricing summary
+       in the pricing_data field. If aws_pricing_lookup fails, fall
+       back to tavily_search and note that pricing should be verified
+       on the AWS pricing page.
 
     6. **Honor gaps.** If the PRFAQ surfaces open gaps or risks,
        carry them into the BRD risk section.

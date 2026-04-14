@@ -77,7 +77,11 @@ class CostFlag(BaseModel):
     why_it_matters: str
     tradeoff: str
     reference_url: str = Field(
-        description="A real URL from Tavily search the PM can investigate. No dollar estimates."
+        description="A real URL from Tavily search the PM can investigate."
+    )
+    pricing_data: str = Field(
+        default="",
+        description="Raw pricing summary from aws_pricing_lookup, for traceability.",
     )
 
 

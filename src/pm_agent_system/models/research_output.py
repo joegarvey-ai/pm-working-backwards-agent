@@ -3,12 +3,39 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class ReviewData(BaseModel):
+    platform: str = Field(description="G2, Capterra, or TrustRadius")
+    rating: str = Field(description="e.g., 4.7/5")
+    review_count: str = Field(default="", description="e.g., 5,200+")
+    source_url: str = Field(default="", description="Link to the review page if available")
+
+
 class CompetitorAnalysis(BaseModel):
     name: str
     description: str
     strengths: list[str]
     weaknesses: list[str]
     relevance: str = Field(description="Why this competitor matters to the PM's problem")
+    review_data: list[ReviewData] = Field(
+        default_factory=list,
+        description="Ratings from G2, Capterra, TrustRadius",
+    )
+    top_pros: list[str] = Field(
+        default_factory=list,
+        description="Recurring positive themes from user reviews",
+    )
+    top_cons: list[str] = Field(
+        default_factory=list,
+        description="Recurring negative themes / complaints from user reviews",
+    )
+    reviewer_roles: list[str] = Field(
+        default_factory=list,
+        description="Common roles of reviewers (e.g., Product Manager, Software Engineer)",
+    )
+    pricing_summary: str = Field(
+        default="",
+        description="Pricing tier info if available from review platforms",
+    )
 
 
 class CustomerQuote(BaseModel):

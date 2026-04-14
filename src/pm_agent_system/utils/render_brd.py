@@ -94,6 +94,23 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
             for cf in output.cost_flags
         ]
         lines += _table(["Decision", "Why It Matters", "Tradeoff", "Reference"], cf_rows)
+        lines.append("")
+
+        # Append pricing data as collapsible reference blocks.
+        pricing_flags = [cf for cf in output.cost_flags if cf.pricing_data]
+        if pricing_flags:
+            lines.append("### Pricing Reference Data")
+            lines.append("")
+            for cf in pricing_flags:
+                lines.append(f"<details>")
+                lines.append(f"<summary>{cf.decision} — AWS Pricing Details</summary>")
+                lines.append("")
+                lines.append("```")
+                lines.append(cf.pricing_data)
+                lines.append("```")
+                lines.append("")
+                lines.append("</details>")
+                lines.append("")
     else:
         lines.append("No cost flags identified.")
     lines.append("")

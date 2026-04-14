@@ -3,6 +3,8 @@ from crewai.project import CrewBase, agent, crew, task
 
 from pm_agent_system.models import BRDOutput, CodingPromptOutput, PRFAQOutput, ResearchOutput
 from pm_agent_system.tools import (
+    AWSPricingTool,
+    CompetitiveIntelTool,
     DovetailSearchTool,
     FileReaderTool,
     ObsidianReadTool,
@@ -38,6 +40,7 @@ class PmAgentSystem:
             config=self.agents_config["research_agent"],  # type: ignore[index]
             tools=[
                 TavilySearchTool(),
+                CompetitiveIntelTool(),
                 DovetailSearchTool(),
                 FileReaderTool(),
                 ObsidianSearchTool(),
@@ -67,6 +70,7 @@ class PmAgentSystem:
             config=self.agents_config["brd_agent"],  # type: ignore[index]
             tools=[
                 TavilySearchTool(),
+                AWSPricingTool(),
                 FileReaderTool(),
                 RequirementsReaderTool(),
                 StyleGuideLoaderTool(),

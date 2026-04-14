@@ -103,12 +103,13 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 | Variable | Required | What it is |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Your Anthropic API key. The agents use Claude. |
-| `TAVILY_API_KEY` | yes | Your Tavily API key. The research agent uses Tavily for web search. |
+| `TAVILY_API_KEY` | yes | Your Tavily API key. The research agent uses Tavily for web search and competitive intelligence. |
 | `DOVETAIL_API_TOKEN` | no | Optional. If you have a Dovetail UX research workspace, the research agent will pull customer evidence from it. Leave blank to skip. |
 | `STYLE_GUIDE_PATH` | no | Path to your writing style guide. Defaults to `samples/style-guide-sample.md`. |
 | `OBSIDIAN_VAULT_PATH` | no | Optional. Path to your Obsidian vault if you want the agents to search your notes. |
 | `OUTPUT_DIR` | no | Where output files go. Defaults to `./output/`. |
 | `DEFAULT_TARGET_TOOL` | no | Which coding tool the build spec is formatted for. One of `kiro`, `claude_code`, `cursor`, `lovable`. Defaults to `kiro`. |
+| `AWS_PRICING_REGION` | no | AWS region for pricing lookups. Defaults to `us-east-1`. The AWS Pricing API is public but boto3 may need credentials — see `.env.example`. |
 | `OUTPUT_RETENTION_DAYS` | no | How many days output files live before being archived. Defaults to 30. |
 
 ## Architecture
@@ -117,9 +118,9 @@ Four agents, each with a single job, chained by a CrewAI orchestrator.
 
 | Agent | Job | Tools |
 |---|---|---|
-| 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, Dovetail (optional), Obsidian (optional), file readers |
+| 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, competitive intelligence (G2/Capterra/TrustRadius), Dovetail (optional), Obsidian (optional), file readers |
 | 2. PRFAQ | Turn the research brief into a Working Backwards press release and FAQ | Style guide loader |
-| 3. BRD | Translate the approved PRFAQ into functional and non-functional requirements | Tavily (cost flags, API doc lookups) |
+| 3. BRD | Translate the approved PRFAQ into functional and non-functional requirements | Tavily (cost flags, API doc lookups), AWS Pricing API (exact per-unit pricing for cost flags) |
 | 4. Build Spec | Format the BRD into a coding-agent-ready spec | None |
 
 The orchestrator lives in `src/pm_agent_system/crew.py`. Agent and task definitions are in `src/pm_agent_system/config/agents.yaml` and `tasks.yaml`. Each agent's outputs are validated against a Pydantic model in `src/pm_agent_system/models/`.
