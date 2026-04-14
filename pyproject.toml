@@ -22,6 +22,9 @@ train = "pm_agent_system.main:train"
 replay = "pm_agent_system.main:replay"
 test = "pm_agent_system.main:test"
 
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
