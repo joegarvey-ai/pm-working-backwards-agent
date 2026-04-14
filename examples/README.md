@@ -26,7 +26,7 @@ The content is synthetic. The numbers, quotes, and company names are illustrativ
 Copy `input.yaml` to a new file, replace the contents with your own product problem, and run:
 
 ```bash
-uv run pm_agent_system full --input path/to/your-input.yaml
+uv run pm_agent_system full-pipeline path/to/your-input.yaml
 ```
 
 See `../SETUP.md` for full setup instructions and `../README.md` for the CLI reference.
