@@ -1,0 +1,3 @@
+ID,Title,Description,Priority,Category,Notes
+CR-001,Example Requirement,"As a [user type], I want to [action] so that [outcome]",P0,Core Feature,Required for MVP launch
+CR-002,,,P1,,

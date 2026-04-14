@@ -7,6 +7,7 @@ from pm_agent_system.tools import (
     FileReaderTool,
     ObsidianReadTool,
     ObsidianSearchTool,
+    RequirementsReaderTool,
     StyleGuideLoaderTool,
     TavilySearchTool,
 )
@@ -67,6 +68,7 @@ class PmAgentSystem:
             tools=[
                 TavilySearchTool(),
                 FileReaderTool(),
+                RequirementsReaderTool(),
                 StyleGuideLoaderTool(),
                 ObsidianSearchTool(),
                 ObsidianReadTool(),

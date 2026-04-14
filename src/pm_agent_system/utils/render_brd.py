@@ -54,6 +54,8 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
         lines.append("")
         lines.append(f"**Rationale:** {fr.rationale}")
         lines.append("")
+        lines.append(f"**Source:** {fr.source}")
+        lines.append("")
         lines.append(f"**Related user stories:** {', '.join(fr.related_user_stories)}")
         lines.append("")
         lines.append("**Acceptance criteria:**")

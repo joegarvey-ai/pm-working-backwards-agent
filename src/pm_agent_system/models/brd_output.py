@@ -10,7 +10,12 @@ class UserStory(BaseModel):
     outcome: str
     priority: str = Field(description="P0, P1, or P2")
     source: str = Field(
-        description="Traceability — references a research finding or PRFAQ section"
+        description=(
+            "Origin and traceability. One of: 'customer_input' (from PM's requirements file), "
+            "'agent-generated' (derived from PRFAQ/research), or 'reconciled' (PM requirement "
+            "modified to align with PRFAQ). May also reference a specific research finding or "
+            "PRFAQ section for traceability."
+        )
     )
 
 
@@ -33,6 +38,14 @@ class FunctionalRequirement(BaseModel):
     code_samples: list[CodeSample] = Field(
         default_factory=list,
         description="API contracts, data model schemas, integration snippets",
+    )
+    source: str = Field(
+        default="agent-generated",
+        description=(
+            "Origin: 'customer_input' (from PM's requirements file), "
+            "'agent-generated' (derived from PRFAQ/research), or 'reconciled' "
+            "(PM requirement modified to align with PRFAQ)"
+        ),
     )
 
 
