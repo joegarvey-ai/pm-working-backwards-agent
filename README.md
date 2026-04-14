@@ -78,6 +78,7 @@ This system runs in multiple environments. Choose the one that fits your workflo
 | I have my own research and just need a PRFAQ | `uv run pm_agent_system generate input.yaml --research-path research.md` |
 | I have an approved PRFAQ and my own requirements | `uv run pm_agent_system brd input.yaml --prfaq-path prfaq.md --requirements-path requirements.csv` |
 | Skip the assumption-challenge step | Add `--skip-validation` to any research/generate/full-pipeline command |
+| Compare two document versions after a revision | `uv run pm_agent_system diff output/prfaq_v1.0.md output/prfaq_v1.1.md` |
 
 Each command pauses for your review before producing the next artifact. See the [CLI Commands](#cli-commands) section below for full details, or the [Platform Support](#platform-support) section for non-CLI options.
 
@@ -92,9 +93,12 @@ Each command pauses for your review before producing the next artifact. See the 
 | `brd <input.yaml> --prfaq-path <file>` | Run Agent 3 to produce a BRD and build spec from an approved PRFAQ. |
 | `build-spec --brd-path <file>` | Regenerate just the build spec from an approved BRD. Useful when switching `--target-tool`. |
 | `revise-brd --brd-path <file>` | Revise an existing BRD. Pass `--context-text` or `--context-path` for the revision notes. |
+| `diff <old> <new>` | Compare two document versions section by section. Shows which sections were added, removed, or changed. |
 | `clean --archive` / `--list` / `--delete-archive` | Manage the `./output/` directory retention policy. |
 
 Run `uv run pm_agent_system <command> --help` for the full options on any command.
+
+Every BRD generation also produces `brd_*_jira_import.csv` and `brd_*_linear_import.md` files in the output directory, ready to import into Jira or Linear.
 
 ## Configuration
 
