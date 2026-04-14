@@ -1,9 +1,12 @@
+import logging
 import os
 from pathlib import Path
 from typing import Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # Default style guide path is resolved relative to the project root at
 # runtime. Override by setting the STYLE_GUIDE_PATH environment variable.
@@ -41,9 +44,11 @@ class StyleGuideLoaderTool(BaseTool):
             path = (Path.cwd() / path).resolve()
 
         if not path.exists() or not path.is_file():
+            logger.warning("Style guide not found at %s, using fallback", path)
             return FALLBACK_MESSAGE
 
         try:
             return path.read_text(encoding="utf-8")
         except Exception as e:
+            logger.warning("Error loading style guide from %s: %s", path, e)
             return f"{FALLBACK_MESSAGE} (load error: {e})"

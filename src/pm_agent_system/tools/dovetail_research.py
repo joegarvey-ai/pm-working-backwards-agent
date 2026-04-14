@@ -1,12 +1,23 @@
+import logging
 import os
 from typing import Type
 
 import httpx
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+logger = logging.getLogger(__name__)
 
 
-DOVETAIL_MCP_BASE = "https://dovetail.com/api/mcp"
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+def _dovetail_post_with_retry(url, json_payload, headers, timeout):
+    response = httpx.post(url, json=json_payload, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return response
+
+
+DOVETAIL_MCP_BASE = os.getenv("DOVETAIL_MCP_BASE_URL", "https://dovetail.com/api/mcp")
 
 
 class DovetailSearchInput(BaseModel):
@@ -53,6 +64,7 @@ class DovetailSearchTool(BaseTool):
         try:
             headers = self._get_headers()
         except ValueError as e:
+            logger.warning("Dovetail auth error: %s", e)
             return str(e)
 
         try:
@@ -65,8 +77,10 @@ class DovetailSearchTool(BaseTool):
             else:
                 return f"Unknown action '{action}'. Use 'search', 'highlights', or 'insights'."
         except httpx.HTTPStatusError as e:
+            logger.warning("Dovetail API HTTP error for query '%s': %s", query, e)
             return f"Dovetail API error (HTTP {e.response.status_code}): {e.response.text}"
         except Exception as e:
+            logger.warning("Dovetail connection error for query '%s': %s", query, e)
             return f"Error connecting to Dovetail: {e}"
 
     def _search_workspace(self, query: str, headers: dict, project_id: str) -> str:
@@ -83,8 +97,7 @@ class DovetailSearchTool(BaseTool):
         if project_id:
             payload["params"]["arguments"]["project_id"] = project_id
 
-        response = httpx.post(DOVETAIL_MCP_BASE, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
+        response = _dovetail_post_with_retry(DOVETAIL_MCP_BASE, payload, headers, 30)
         data = response.json()
 
         result = data.get("result", {})
@@ -114,8 +127,7 @@ class DovetailSearchTool(BaseTool):
         if project_id:
             payload["params"]["arguments"]["project_id"] = project_id
 
-        response = httpx.post(DOVETAIL_MCP_BASE, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
+        response = _dovetail_post_with_retry(DOVETAIL_MCP_BASE, payload, headers, 30)
         data = response.json()
 
         result = data.get("result", {})
@@ -145,8 +157,7 @@ class DovetailSearchTool(BaseTool):
         if project_id:
             payload["params"]["arguments"]["project_id"] = project_id
 
-        response = httpx.post(DOVETAIL_MCP_BASE, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
+        response = _dovetail_post_with_retry(DOVETAIL_MCP_BASE, payload, headers, 30)
         data = response.json()
 
         result = data.get("result", {})

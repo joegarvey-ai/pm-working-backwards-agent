@@ -1,9 +1,12 @@
+import logging
 import os
 from pathlib import Path
 from typing import Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class FileReaderInput(BaseModel):
@@ -27,8 +30,10 @@ class FileReaderTool(BaseTool):
         path = Path(file_path).expanduser().resolve()
 
         if not path.exists():
+            logger.warning("File not found: %s", path)
             return f"Error: File not found at {path}"
         if not path.is_file():
+            logger.warning("Not a file: %s", path)
             return f"Error: {path} is not a file."
 
         suffix = path.suffix.lower()
@@ -43,6 +48,7 @@ class FileReaderTool(BaseTool):
             else:
                 return self._read_text(path)
         except Exception as e:
+            logger.warning("Error reading file %s: %s", path, e)
             return f"Error reading {path}: {e}"
 
     def _read_text(self, path: Path) -> str:

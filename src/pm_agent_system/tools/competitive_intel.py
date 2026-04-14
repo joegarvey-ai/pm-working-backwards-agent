@@ -5,8 +5,8 @@ to return structured review data: ratings, feature comparisons, user
 complaints, and pricing tiers. Reuses the existing TAVILY_API_KEY.
 
 Uses search_depth="advanced" for fuller content from review platforms.
-Runs separate pros and cons queries per platform (6 queries total) to
-produce distinct positive and negative themes.
+Runs one combined query per platform (3 queries total) and extracts
+ratings, pros, cons, and pricing from the results.
 """
 
 import logging
@@ -15,8 +15,14 @@ import re
 
 from crewai.tools import BaseTool
 from tavily import TavilyClient
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+def _tavily_search_with_retry(client, query, max_results, search_depth):
+    return client.search(query=query, max_results=max_results, search_depth=search_depth)
 
 PROS_INDICATORS = [
     "like", "love", "great", "excellent", "best", "strong", "easy",
@@ -208,73 +214,51 @@ class CompetitiveIntelTool(BaseTool):
         cons_snippets: list[str] = []
 
         for platform in platforms:
-            # Query 1: Ratings overview
-            rating_query = f"{product_name} {platform} reviews rating"
-            # Query 2: What users like (pros)
-            pros_query = f"{product_name} {platform} reviews what users like best"
-            # Query 3: Complaints and limitations (cons)
-            cons_query = f"{product_name} {platform} reviews complaints limitations"
+            # Single combined query per platform (3 total instead of 9).
+            query = f"{product_name} {platform} reviews rating pros cons"
 
             p_snippets: list[str] = []
-            platform_pros: list[str] = []
-            platform_cons: list[str] = []
             source_url = ""
             rating = ""
             review_count = ""
 
-            for query, query_type in [
-                (rating_query, "rating"),
-                (pros_query, "pros"),
-                (cons_query, "cons"),
-            ]:
-                try:
-                    response = client.search(
-                        query=query,
-                        max_results=5,
-                        search_depth="advanced",
-                    )
-                    results = response.get("results", [])
-                    snippets = [r.get("content", "") for r in results if r.get("content")]
-                    p_snippets.extend(snippets)
-                    all_snippets.extend(snippets)
+            try:
+                response = _tavily_search_with_retry(
+                    client, query, 8, "advanced",
+                )
+                results = response.get("results", [])
+                snippets = [r.get("content", "") for r in results if r.get("content")]
+                p_snippets.extend(snippets)
+                all_snippets.extend(snippets)
+                pros_snippets.extend(snippets)
+                cons_snippets.extend(snippets)
 
-                    if query_type == "pros":
-                        platform_pros.extend(snippets)
-                        pros_snippets.extend(snippets)
-                    elif query_type == "cons":
-                        platform_cons.extend(snippets)
-                        cons_snippets.extend(snippets)
+                # Extract rating from combined results.
+                combined_text = " ".join(snippets)
+                r, rc = _extract_rating(combined_text, platform)
+                if r:
+                    rating = r
+                if rc:
+                    review_count = rc
 
-                    # Extract rating from the rating query.
-                    if query_type == "rating":
-                        combined_text = " ".join(snippets)
-                        r, rc = _extract_rating(combined_text, platform)
-                        if r:
-                            rating = r
-                        if rc:
-                            review_count = rc
+                # Find a source URL.
+                for r in results:
+                    url = r.get("url", "")
+                    if platform.lower() in url.lower():
+                        source_url = url
+                        break
 
-                    # Find a source URL from any query.
-                    if not source_url:
-                        for r in results:
-                            url = r.get("url", "")
-                            if platform.lower() in url.lower():
-                                source_url = url
-                                break
-
-                except Exception as exc:
-                    logger.warning(
-                        "Tavily search failed for %s on %s (%s): %s",
-                        product_name, platform, query_type, exc,
-                    )
+            except Exception as exc:
+                logger.warning(
+                    "Tavily search failed for %s on %s: %s",
+                    product_name, platform, exc,
+                )
 
             platform_data[platform] = {
                 "rating": rating,
                 "review_count": review_count,
                 "source_url": source_url,
                 "snippets": p_snippets,
-                "pros_snippets": platform_pros,
-                "cons_snippets": platform_cons,
             }
 
         # Build the summary.

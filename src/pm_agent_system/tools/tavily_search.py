@@ -1,9 +1,18 @@
+import logging
 import os
 from typing import Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 from tavily import TavilyClient
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+logger = logging.getLogger(__name__)
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+def _search_with_retry(client, query, max_results, search_depth):
+    return client.search(query=query, max_results=max_results, search_depth=search_depth)
 
 
 class TavilySearchInput(BaseModel):
@@ -34,16 +43,14 @@ class TavilySearchTool(BaseTool):
     def _run(self, query: str, max_results: int = 5, search_depth: str = "advanced") -> str:
         api_key = os.getenv("TAVILY_API_KEY")
         if not api_key:
+            logger.warning("TAVILY_API_KEY not set in environment variables")
             return "Error: TAVILY_API_KEY not set in environment variables."
 
         try:
             client = TavilyClient(api_key=api_key)
-            response = client.search(
-                query=query,
-                max_results=max_results,
-                search_depth=search_depth,
-            )
+            response = _search_with_retry(client, query, max_results, search_depth)
         except Exception as e:
+            logger.warning("Tavily search failed for query '%s': %s", query, e)
             return f"Error performing Tavily search: {e}"
 
         results = response.get("results", [])

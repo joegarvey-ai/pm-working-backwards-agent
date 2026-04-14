@@ -17,8 +17,14 @@ from botocore import UNSIGNED
 from botocore.config import Config
 from crewai.tools import BaseTool
 from pydantic import Field
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+def _get_products_with_retry(client, service_code, filters, max_results):
+    return client.get_products(ServiceCode=service_code, Filters=filters, MaxResults=max_results)
 
 # Map natural service names to AWS service codes.
 SERVICE_CODE_MAP = {
@@ -76,18 +82,21 @@ def _resolve_service_code(name: str) -> str:
 def _build_client(region: str = "us-east-1") -> boto3.client:
     """Create a Pricing API client.
 
-    Tries unsigned (no credentials) first. If that fails at call time,
-    the caller should retry with default credentials.
+    Tries default credential chain first. Falls back to unsigned
+    (public API) if no credentials are configured.
     """
     try:
+        client = boto3.client("pricing", region_name=region)
+        # Verify credentials are available by making a lightweight call.
+        boto3.client("sts", region_name=region).get_caller_identity()
+        return client
+    except Exception:
+        logger.debug("Default credentials unavailable, trying unsigned access")
         return boto3.client(
             "pricing",
             region_name=region,
             config=Config(signature_version=UNSIGNED),
         )
-    except Exception:
-        # Fall back to default credential chain.
-        return boto3.client("pricing", region_name=region)
 
 
 def _extract_pricing(products: list[dict], service_code: str) -> str:
@@ -200,11 +209,7 @@ class AWSPricingTool(BaseTool):
                         "Value": product_family,
                     }
                 )
-            response = client.get_products(
-                ServiceCode=resolved,
-                Filters=filters,
-                MaxResults=100,
-            )
+            response = _get_products_with_retry(client, resolved, filters, 100)
         except client.exceptions.NotFoundException:
             return (
                 f"Could not find pricing for '{service_code}' "

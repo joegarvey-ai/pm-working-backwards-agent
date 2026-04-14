@@ -1,9 +1,12 @@
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 # Default to "~/Obsidian" if OBSIDIAN_VAULT_PATH is not set. Set the env var
 # to point at your own Obsidian vault, or leave it unset if you don't use
@@ -49,12 +52,14 @@ class ObsidianSearchTool(BaseTool):
     def _run(self, query: str, folder: str = "") -> str:
         root = _vault_root()
         if not root.exists():
+            logger.warning("Obsidian vault not found at %s", root)
             return f"Obsidian vault not found at {root}"
 
         search_root = root
         if folder:
             resolved = _safe_resolve(folder)
             if resolved is None or not resolved.exists():
+                logger.warning("Obsidian folder '%s' not found in vault", folder)
                 return f"Folder '{folder}' not found in vault."
             search_root = resolved
 
@@ -96,10 +101,13 @@ class ObsidianReadTool(BaseTool):
     def _run(self, path: str) -> str:
         target = _safe_resolve(path)
         if target is None:
+            logger.warning("Path '%s' is outside the vault", path)
             return f"Path '{path}' is outside the vault."
         if not target.exists() or not target.is_file():
+            logger.warning("Note '%s' not found in vault", path)
             return f"Note '{path}' not found in vault."
         try:
             return target.read_text(encoding="utf-8")
         except Exception as e:
+            logger.warning("Error reading '%s': %s", path, e)
             return f"Error reading '{path}': {e}"
