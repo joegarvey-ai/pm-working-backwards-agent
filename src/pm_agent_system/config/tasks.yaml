@@ -154,6 +154,18 @@ research_task:
     - If you don't have a number, say so in Gaps and Limitations.
     - Direct customer quotes go in quotation marks with the source.
 
+    Anti-hallucination rules:
+    - If a Tavily search returns no results for a topic, do NOT invent
+      data. Remove the claim and add the topic to gaps_and_limitations.
+    - Never fabricate a statistic, customer quote, or source URL.
+    - Never generate a URL that you did not receive from a tool response.
+    - If you have fewer than 3 competitors after searching, report what
+      you found and note the gap. Do not invent competitors.
+    - If Dovetail returns no results or is unavailable, note "No internal
+      customer research data was available" in the customer_evidence
+      section and add it to gaps_and_limitations. Do not fabricate
+      interview quotes.
+
   expected_output: >
     A markdown document with the following sections. Every factual claim
     must include an inline `[source](url)` citation.
@@ -244,6 +256,16 @@ generate_prfaq:
        list is non-empty, you MUST reference those gaps honestly in the
        internal FAQ risk question and in the appendix_gaps. Do not write
        around them. Do not pretend they don't exist.
+
+    3a. **Do not fabricate.** If the research brief has fewer than 3
+       competitors, do not invent additional ones for the competitor
+       table. If no customer quotes exist in the research, the fictional
+       customer quote in the press release must be explicitly labeled:
+       "[Illustrative quote — replace with real customer feedback before
+       stakeholder review]". If the research has significant gaps, the
+       internal FAQ must include a question about what remains unvalidated
+       and what the plan is to close those gaps before committing
+       engineering resources.
 
     4. **Use business context.** If business_context was provided in the
        original input, reference it in the Internal FAQ section when
@@ -472,6 +494,9 @@ generate_brd_chained:
     2. **Problem statement** — what's broken, who it affects, evidence.
     3. **Proposed solution overview** — high-level approach. MUST include
        a Mermaid architecture diagram inline as a fenced ```mermaid block.
+       The diagram should have 5-15 nodes. If the system is more complex,
+       use a high-level diagram here and add a detailed breakdown in the
+       technical context section.
     4. **User stories** — minimum 3. Each has ID (US-001), persona,
        action, outcome, priority (P0/P1/P2), and source.
     5. **Functional requirements** — minimum 3. Each has ID (FR-001),
@@ -484,7 +509,8 @@ generate_brd_chained:
        Quantified targets only. "Fast" is banned; "p95 latency < 200ms"
        is correct.
     7. **Technical context and dependencies** — current state. MUST
-       include a Mermaid diagram of the existing system inline.
+       include a Mermaid diagram of the existing system inline. Keep it
+       to 5-15 nodes showing the major components and their relationships.
     8. **Cost flags** — architectural decisions with cost implications.
        Each flag: decision, why_it_matters, tradeoff, reference_url
        (from Tavily). No dollar amounts.
@@ -732,7 +758,9 @@ generate_brd_standalone:
     1. **Executive summary** — 3-5 sentences.
     2. **Problem statement** — what's broken, who it affects, evidence.
     3. **Proposed solution overview** — MUST include a Mermaid architecture
-       diagram inline.
+       diagram inline. The diagram should have 5-15 nodes. If the system
+       is more complex, use a high-level diagram here and add a detailed
+       breakdown in the technical context section.
     4. **User stories** — minimum 3, with ID, persona, action, outcome,
        priority (P0/P1/P2), source.
     5. **Functional requirements** — minimum 3, "The system shall...",
@@ -740,7 +768,8 @@ generate_brd_standalone:
        and code samples (API contracts, schemas) where useful.
     6. **Non-functional requirements** — minimum 2, quantified targets only.
     7. **Technical context and dependencies** — MUST include a Mermaid
-       diagram of the existing system.
+       diagram of the existing system. Keep it to 5-15 nodes showing the
+       major components and their relationships.
     8. **Cost flags** — decision, why_it_matters, tradeoff, reference_url.
     9. **Risks** — minimum 2.
     10. **Success metrics** — minimum 1.
