@@ -107,14 +107,14 @@ class BRDOutput(BaseModel):
     proposed_solution_overview: str = Field(
         description="Includes a Mermaid architecture diagram inline as a fenced code block"
     )
-    user_stories: list[UserStory] = Field(min_length=3)
-    functional_requirements: list[FunctionalRequirement] = Field(min_length=3)
-    non_functional_requirements: list[NonFunctionalRequirement] = Field(min_length=2)
+    user_stories: list[UserStory] = Field(default_factory=list, min_length=3)
+    functional_requirements: list[FunctionalRequirement] = Field(default_factory=list, min_length=3)
+    non_functional_requirements: list[NonFunctionalRequirement] = Field(default_factory=list, min_length=2)
     technical_context_and_dependencies: str = Field(
         description="Includes a Mermaid diagram of the current state inline"
     )
-    cost_flags: list[CostFlag]
-    risks: list[Risk] = Field(min_length=2)
-    success_metrics: list[SuccessMetric] = Field(min_length=1)
+    cost_flags: list[CostFlag] = Field(default_factory=list)
+    risks: list[Risk] = Field(default_factory=list, min_length=2)
+    success_metrics: list[SuccessMetric] = Field(default_factory=list, min_length=1)
     timeline_and_milestones: str
-    version_history: list[VersionEntry] = Field(min_length=1)
+    version_history: list[VersionEntry] = Field(default_factory=list, min_length=1)

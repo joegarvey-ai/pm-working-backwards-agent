@@ -84,12 +84,13 @@ class ResearchOutput(BaseModel):
     market_sizing: MarketSizing
 
     competitors: list[CompetitorAnalysis] = Field(
+        default_factory=list,
         min_length=3, description="Minimum 3 competitors"
     )
 
-    customer_evidence: list[CustomerQuote]
+    customer_evidence: list[CustomerQuote] = Field(default_factory=list)
 
-    pain_points: list[PainPoint]
+    pain_points: list[PainPoint] = Field(default_factory=list)
 
     internal_state: Optional[InternalStateAssessment] = Field(
         default=None,
@@ -101,7 +102,8 @@ class ResearchOutput(BaseModel):
     )
 
     gaps_and_limitations: list[str] = Field(
+        default_factory=list,
         description="What couldn't be found or remains unvalidated"
     )
 
-    sources: list[str] = Field(description="All sources cited, for reference index")
+    sources: list[str] = Field(default_factory=list, description="All sources cited, for reference index")

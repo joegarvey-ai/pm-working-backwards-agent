@@ -24,8 +24,9 @@ class PRFAQOutput(BaseModel):
         "the product has already launched. Includes a fictional customer quote "
         "grounded in real evidence."
     )
-    external_faqs: list[FAQ] = Field(min_length=3)
+    external_faqs: list[FAQ] = Field(default_factory=list, min_length=3)
     internal_faqs: list[FAQ] = Field(
+        default_factory=list,
         min_length=5,
         description="Stakeholder-facing FAQs. MUST include a strategy question "
         "answered using the diagnosis / guiding policy / coherent actions "
@@ -37,16 +38,22 @@ class PRFAQOutput(BaseModel):
         "third person. Specific enough that a designer could sketch from it."
     )
     appendix_data_points: list[str] = Field(
+        default_factory=list,
         description="Key facts and metrics from the research, each with an "
         "inline [source](url) citation."
     )
     appendix_competitor_table: list[dict[str, Any]] = Field(
+        default_factory=list,
         description="Competitor comparison rows. Each dict should include at "
         "minimum: name, positioning, key_features, pricing (if known), source."
     )
-    appendix_customer_quotes: list[CustomerQuote]
+    appendix_customer_quotes: list[CustomerQuote] = Field(default_factory=list)
     appendix_gaps: list[str] = Field(
+        default_factory=list,
         description="Open questions and unvalidated assumptions carried over "
         "from research, plus any new gaps surfaced while drafting."
     )
-    version_history: list[VersionEntry] = Field(min_length=1)
+    version_history: list[VersionEntry] = Field(
+        default_factory=list,
+        description='Version history entries. Each should include version, date, author, and changes.'
+    )
