@@ -733,18 +733,26 @@ def cmd_clean(args: argparse.Namespace) -> None:
         if not files:
             print(f"Archive is already empty: {archive}")
             return
-        confirm = input(
-            f"Permanently delete {len(files)} files from {archive}? [y/N] "
-        ).strip().lower()
-        if confirm != "y":
-            print("Aborted.")
+        print(
+            f"This will permanently delete all {len(files)} archived output "
+            f"files in {archive}. This cannot be undone."
+        )
+        confirm = input("Type 'yes' to confirm: ").strip()
+        if confirm != "yes":
+            print("Aborted. No files were deleted.")
             return
+        deleted = 0
+        freed_bytes = 0
         for p in files:
             try:
+                size = p.stat().st_size
                 p.unlink()
+                deleted += 1
+                freed_bytes += size
             except Exception as e:
                 print(f"  failed to delete {p.name}: {e}")
-        print(f"Deleted {len(files)} files from archive.")
+        freed_mb = freed_bytes / (1024 * 1024)
+        print(f"Deleted {deleted} files from archive ({freed_mb:.2f} MB freed).")
         return
 
     if args.archive:
@@ -838,7 +846,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("--list", action="store_true", help="List live and archived output files")
     p_clean.set_defaults(func=cmd_clean)
 
-    p_diff = sub.add_parser("diff", help="Compare two document versions section by section")
+    p_diff = sub.add_parser(
+        "diff",
+        help="Compare two document versions section by section",
+        description=(
+            "Compare two document versions section by section. "
+            "Note: Section matching uses exact header text. If you renamed a "
+            "section header between versions, the diff will show it as a "
+            "deletion and addition rather than a modification."
+        ),
+    )
     p_diff.add_argument("old_path", help="Path to the older version")
     p_diff.add_argument("new_path", help="Path to the newer version")
     p_diff.set_defaults(func=cmd_diff)

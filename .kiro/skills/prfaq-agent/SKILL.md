@@ -13,7 +13,7 @@ Transforms approved research into a Working Backwards document (PRFAQ) that stak
 - Task prompts: #[[file:src/pm_agent_system/config/tasks.yaml]] (generate_prfaq and revise_prfaq sections)
 - Output schema: #[[file:src/pm_agent_system/models/prfaq_output.py]]
 - Renderer: #[[file:src/pm_agent_system/utils/render_prfaq.py]]
-- Style guide: #[[file:samples/style-guide-sample.md]]
+- Style guide: #[[file:examples/templates/style-guide-sample.md]]
 
 ## Modes
 - **Generate**: Create PRFAQ v1.0 from research findings

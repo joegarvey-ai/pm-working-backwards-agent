@@ -7,7 +7,7 @@ You can run the Working Backwards pipeline entirely through conversation in Clau
 ### Claude.ai Project
 1. Go to claude.ai and create a new Project
 2. In the Project Knowledge section, upload these files from the repo:
-   - `samples/style-guide-sample.md` (or your custom style guide)
+   - `examples/templates/style-guide-sample.md` (or your custom style guide)
    - `.kiro/skills/research-agent/SKILL.md`
    - `.kiro/skills/prfaq-agent/SKILL.md`
    - `.kiro/skills/brd-build-spec-agent/SKILL.md`

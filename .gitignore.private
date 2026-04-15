@@ -9,7 +9,7 @@ config/stakeholder_avatars/
 internal_docs/
 
 # Custom style guide with company voice
-samples/my-style-guide.md
+examples/templates/my-style-guide.md
 
 # Output from real pipeline runs (may contain proprietary content)
 output/*.md

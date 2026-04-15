@@ -1,0 +1,31 @@
+# Jira CSV Import Column Mapping
+# Customize these to match your Jira instance's import requirements.
+# Every Jira instance is different — custom fields like "Acceptance Criteria"
+# and "Story Points" may not exist in your instance. Edit the values below
+# to match the column headers your Jira import expects, then re-run the
+# BRD export (this file is read each time the BRD is generated).
+#
+# Each key is the internal field name. The value is the column header
+# that will appear in the exported CSV.
+
+columns:
+  summary: "Summary"                         # Required by Jira
+  description: "Description"                 # Required by Jira
+  issue_type: "Issue Type"                   # Required — e.g., Story, Task, Bug
+  priority: "Priority"                       # e.g., Highest, High, Medium, Low, Lowest
+  labels: "Labels"                           # Optional — comma-separated
+  acceptance_criteria: "Acceptance Criteria" # Custom field — may not exist in your instance
+
+# Default issue types
+user_story_issue_type: "Story"
+functional_requirement_issue_type: "Task"
+
+# Priority mapping from P0-P4 to Jira priority names.
+# If a user story uses a priority not in this map, the Jira priority
+# will be set to "Medium".
+priority_map:
+  P0: "Highest"
+  P1: "High"
+  P2: "Medium"
+  P3: "Low"
+  P4: "Lowest"

@@ -12,6 +12,9 @@ venv/
 output/
 output/archive/
 !output/.gitkeep
+# User input files may contain company-specific context — keep them local.
+input/*
+!input/README.md
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

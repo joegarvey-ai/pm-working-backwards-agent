@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Default style guide path is resolved relative to the project root at
 # runtime. Override by setting the STYLE_GUIDE_PATH environment variable.
-DEFAULT_STYLE_GUIDE_PATH = "samples/style-guide-sample.md"
+DEFAULT_STYLE_GUIDE_PATH = "examples/templates/style-guide-sample.md"
 
 FALLBACK_MESSAGE = (
     "No style guide configured. Using default writing rules from the agent "
@@ -27,7 +27,7 @@ class StyleGuideLoaderTool(BaseTool):
     description: str = (
         "Load the writing style guide from disk and return its full text. "
         "Reads from STYLE_GUIDE_PATH env var if set, otherwise falls back to "
-        "samples/style-guide-sample.md in the project root. Call this once "
+        "examples/templates/style-guide-sample.md in the project root. Call this once "
         "before drafting any prose so the rules are in working memory. "
         "Takes no arguments."
     )

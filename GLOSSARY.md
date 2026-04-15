@@ -2,30 +2,36 @@
 
 Plain-English definitions for the terms used in this project. If a term in the README or SETUP isn't here, open an issue and we'll add it.
 
-**Agent.** A program that uses an LLM (here, Claude) to do one specific job. This project has four: Research, PRFAQ, BRD, and Build Spec. Each agent has a role description, instructions, and a set of tools it can call.
-
-**Orchestrator.** The piece of code that decides which agent runs when, and passes the output of one agent to the next. In this project, CrewAI is the orchestrator.
-
-**CrewAI.** An open-source Python framework for building multi-agent systems. It handles the boring parts: passing messages between agents, retrying failed steps, validating outputs. We use it so we don't have to write that infrastructure ourselves. See [crewai.com](https://www.crewai.com/).
-
-**YAML.** A file format for configuration. It looks like a list of `key: value` pairs and is designed to be readable by humans. Our agent definitions and your input files are both YAML.
+**Agent.** A program that uses an LLM (here, Claude) to do one specific job. This project has three: Research, PRFAQ, and BRD + Build Spec. Each agent has a role description, instructions, and a set of tools it can call.
 
 **API Key.** A long string of characters that proves to an external service (Anthropic, Tavily) that you're allowed to use it. Treat API keys like passwords. Never share them, never commit them to git.
 
-**Pydantic.** A Python library that defines what a piece of data should look like and validates it. We use it to make sure each agent's output has the right shape (e.g., a research brief always has a "Sources" section). If an agent returns the wrong shape, Pydantic catches it before the next agent runs.
+**BRD (Business Requirements Document).** A structured document that translates a product concept into engineer-ready requirements. Includes user stories, functional requirements with acceptance criteria, non-functional requirements, cost flags, and risk assessments. In this system, Agent 3 produces the BRD from an approved PRFAQ. Where the PRFAQ says "merchants can drill into a SKU's funnel," the BRD says "FR-3: Filter by SKU (single or multi-select), priority P0."
 
-**MCP.** Model Context Protocol. A standard for letting LLMs talk to external tools and data sources. The optional Dovetail integration uses MCP under the hood.
+**Build Spec.** A formatted document that a coding agent (Kiro, Claude Code, Cursor, or Lovable) can execute against. It contains user flows, feature specs with acceptance criteria, technical constraints, and an architecture reference — everything the coding tool needs to start building. Agent 3 produces this from the approved BRD, formatted for your chosen tool.
 
-**PRFAQ.** "Press Release plus Frequently Asked Questions." An Amazon-popularized format for product proposals. You write the press release as if the product already exists, then a FAQ that answers the hard questions a stakeholder would ask. Forces clarity about what you're really building and why.
+**Cost flag.** An entry in the BRD that identifies an architectural decision with cost implications. Cost flags describe the decision, the tradeoff, and specific AWS pricing data — but they do not estimate total project cost. The PM and engineering lead evaluate cost using these flags as a starting point.
 
-**BRD.** "Business Requirements Document." The translation of an approved PRFAQ into specific functional and non-functional requirements that an engineering team can build against. Where the PRFAQ says "merchants can drill into a SKU's funnel," the BRD says "FR-3: Filter by SKU (single or multi-select), priority P0."
-
-**Tavily.** A web search API designed for LLMs. The research agent uses it to find market data, competitor information, and customer reviews on the public internet. See [tavily.com](https://tavily.com).
+**CrewAI.** An open-source Python framework for building multi-agent systems. It handles the boring parts: passing messages between agents, retrying failed steps, validating outputs. We use it so we don't have to write that infrastructure ourselves. See [crewai.com](https://www.crewai.com/).
 
 **Dovetail.** A UX research repository product. If your team uses Dovetail to store customer interview transcripts, the research agent can pull quotes from it. Optional. See [dovetail.com](https://dovetail.com).
 
+**Human-in-the-loop checkpoint.** A pause between agents where the system stops and waits for your review. You read the output, decide if it's good enough, and either approve it (the next agent runs) or revise it (using the `revise` command). The system never auto-advances from one stage to the next without your approval.
+
 **Kiro.** A coding agent IDE built around spec-driven development. The build spec agent can format its output specifically for Kiro's expected spec structure. See [kiro.dev](https://kiro.dev).
 
-**Human-in-the-loop.** A system design where the AI does the heavy lifting but a human reviews and approves at each handoff. In this project, the agents do not auto-advance from research to PRFAQ to BRD. You read each output, decide if it's good, and either approve it or run a `revise` command.
+**MCP.** Model Context Protocol. A standard for letting LLMs talk to external tools and data sources. The optional Dovetail integration uses MCP under the hood.
 
-**Working Backwards.** A product development practice where you start by writing the press release for the finished product, then work backward to figure out what you have to build. The PRFAQ is the artifact of Working Backwards. The point is to force you to articulate the customer benefit before you commit any engineering effort.
+**Orchestrator.** The piece of code that decides which agent runs when, and passes the output of one agent to the next. In this project, CrewAI is the orchestrator.
+
+**PRFAQ (Press Release / Frequently Asked Questions).** A product planning document popularized by Amazon's "Working Backwards" process. You write a fictional press release announcing the product as if it already launched, then answer the hard questions (from customers and stakeholders) in an FAQ section. The idea is to force clarity about what you're building and why before any engineering starts. In this system, Agent 2 produces the PRFAQ from approved research.
+
+**Pydantic.** A Python library that defines what a piece of data should look like and validates it. We use it to make sure each agent's output has the right shape (e.g., a research brief always has a "Sources" section). If an agent returns the wrong shape, Pydantic catches it before the next agent runs.
+
+**Reconciliation (requirements).** When you provide a pre-existing requirements file via `--requirements-path`, Agent 3 compares your requirements against the approved PRFAQ. Requirements that align are kept. Requirements that contradict the PRFAQ are flagged. Gaps in your list (requirements implied by the PRFAQ but not in your file) are filled by the agent and marked as "agent-generated."
+
+**Tavily.** A web search API designed for LLMs. The research agent uses it to find market data, competitor information, and customer reviews on the public internet. See [tavily.com](https://tavily.com).
+
+**Working Backwards.** A product development approach where you start from the customer experience and work backward to the technology required to deliver it. The PRFAQ is the primary artifact of this process. This system automates the first draft of the Working Backwards artifacts.
+
+**YAML.** A file format for configuration. It looks like a list of `key: value` pairs and is designed to be readable by humans. Our agent definitions and your input files are both YAML.

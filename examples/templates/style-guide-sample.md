@@ -64,4 +64,4 @@ To use your own style guide, do one of the following.
 2. Create a new file (anywhere on your machine) and set `STYLE_GUIDE_PATH` in your `.env` to its absolute path.
 3. If you don't have a style guide and don't want to write one, leave this file as-is. The defaults above are reasonable for most product writing.
 
-The agents will read whatever file `STYLE_GUIDE_PATH` resolves to at runtime, and fall back to `samples/style-guide-sample.md` (this file) if the env var is unset.
+The agents will read whatever file `STYLE_GUIDE_PATH` resolves to at runtime, and fall back to `examples/templates/style-guide-sample.md` (this file) if the env var is unset.

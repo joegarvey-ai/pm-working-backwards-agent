@@ -1,0 +1,12 @@
+# Linear Markdown Import Field Labels
+# Customize these to match the field names your team uses in Linear.
+# The Linear bulk-issue markdown import reads headings and bolded labels
+# to populate issue fields. Change the values to match your team's naming.
+
+labels:
+  priority: "Priority"
+  persona: "Persona"
+  outcome: "Outcome"
+  origin: "Origin"
+  rationale: "Rationale"
+  acceptance_criteria: "Acceptance Criteria"

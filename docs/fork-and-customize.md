@@ -37,7 +37,7 @@ git commit -m "Add team gitignore rules"
 ### 3. Add your company content
 
 **Style guide:**
-Copy `samples/style-guide-sample.md` to `samples/my-style-guide.md` and customize it for your company's voice. Update `STYLE_GUIDE_PATH` in `.env` to point to your version.
+Copy `examples/templates/style-guide-sample.md` to `examples/templates/my-style-guide.md` and customize it for your company's voice. Update `STYLE_GUIDE_PATH` in `.env` to point to your version.
 
 **Stakeholder avatars** (personal fork only):
 Create `config/stakeholder_avatars/` and add one YAML file per stakeholder:
@@ -86,7 +86,7 @@ Your company-specific files are in `.gitignore`, so they won't conflict with ups
 | Content | Where it lives | In .gitignore? |
 |---|---|---|
 | Agent configs (agents.yaml, tasks.yaml) | `src/pm_agent_system/config/` | No — these are part of the system |
-| Your style guide | `samples/my-style-guide.md` | Yes (.private and .team) |
+| Your style guide | `examples/templates/my-style-guide.md` | Yes (.private and .team) |
 | Stakeholder avatars | `config/stakeholder_avatars/` | Yes (.private) / Partial (.team) |
 | Internal reference docs | `internal_docs/` | Yes (.private and .team) |
 | Pipeline output | `output/` | Yes (.private and .team) |
