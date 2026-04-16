@@ -29,7 +29,16 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from pm_agent_system.crew import PmAgentSystem
+from pm_agent_system.checkpoint import (
+    completed_stages,
+    compute_input_hash,
+    delete_checkpoint,
+    load_checkpoint,
+    new_checkpoint,
+    record_artifact,
+    save_checkpoint,
+)
+from pm_agent_system.crew import PmAgentSystem, _MODEL
 from pm_agent_system.models import (
     VALID_TARGET_TOOLS,
     BRDOutput,
@@ -447,6 +456,46 @@ def cmd_revise(args: argparse.Namespace) -> None:
 # ---------- Subcommand: full-pipeline (Agents 1 → 2 → 3) ----------
 
 
+def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint):
+    """Inspect a single task output, save its artifact to disk, and update the checkpoint.
+
+    Returns the artifact name if one was saved, else None.
+    """
+    if not hasattr(task_output, "pydantic") or task_output.pydantic is None:
+        return None
+
+    obj = task_output.pydantic
+
+    if isinstance(obj, ResearchOutput):
+        md = render_research_to_markdown(obj)
+        path = save_markdown_brief(md)
+        print(f"Research brief saved to: {path}")
+        record_artifact(checkpoint, "research_brief", str(path))
+        save_checkpoint(output_dir, checkpoint)
+        return "research_brief"
+
+    if isinstance(obj, PRFAQOutput):
+        version = obj.version_history[-1].version if obj.version_history else "1.0"
+        md = render_prfaq_to_markdown(obj, slug=slug)
+        path = save_prfaq(md, label, version)
+        print(f"PRFAQ saved to: {path}")
+        record_artifact(checkpoint, "prfaq", str(path))
+        save_checkpoint(output_dir, checkpoint)
+        return "prfaq"
+
+    if isinstance(obj, BRDOutput):
+        version = obj.version_history[-1].version if obj.version_history else "1.0"
+        md = render_brd_to_markdown(obj, slug=slug)
+        path = save_brd(md, label, version)
+        print(f"BRD saved to: {path}")
+        save_brd_exports(obj, label)
+        record_artifact(checkpoint, "brd", str(path))
+        save_checkpoint(output_dir, checkpoint)
+        return "brd"
+
+    return None
+
+
 def cmd_full_pipeline(args: argparse.Namespace) -> None:
     inputs = validate_input(load_input(args.input_file))
     publish_dir = validate_publish_destination(inputs.get("publish_destination", ""))
@@ -464,8 +513,47 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             sys.exit(1)
         requirements_path_arg = str(reqp)
 
+    label = inputs["feature_summary"]
+    slug = _slugify(label)
+    output_dir = _output_dir()
+    input_hash = compute_input_hash(args.input_file)
+
+    # --fresh: delete any existing checkpoint
+    if getattr(args, "fresh", False):
+        delete_checkpoint(output_dir)
+
+    # --resume: check for a resumable checkpoint
+    resume = getattr(args, "resume", False)
+    done = set()
+    if resume:
+        existing = load_checkpoint(output_dir)
+        if existing is not None:
+            if existing.get("input_hash") != input_hash:
+                print("Warning: Input has changed since last run — starting fresh.")
+            else:
+                done = completed_stages(existing)
+                if done:
+                    print(f"Resuming. Already completed: {', '.join(sorted(done))}")
+
+    # Determine what to run
+    need_research = "research_brief" not in done
+    need_prfaq = "prfaq" not in done
+    need_brd = "brd" not in done
+
+    if not need_research and not need_prfaq and not need_brd:
+        print("All artifacts already present from a prior run. Nothing to do.")
+        print("Use --fresh to force a full re-run.")
+        delete_checkpoint(output_dir)
+        return
+
+    # Initialize or re-use checkpoint
+    if done:
+        checkpoint = load_checkpoint(output_dir) or new_checkpoint(input_hash, _MODEL)
+    else:
+        checkpoint = new_checkpoint(input_hash, _MODEL)
+        save_checkpoint(output_dir, checkpoint)
+
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
-    # Empty path placeholders so the BRD/build-spec tasks don't break templating.
     crew_inputs.update({
         "prfaq_path": "",
         "research_path": "",
@@ -473,65 +561,76 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         "brd_path": "",
         "target_tool": target_tool,
     })
-
-    print(f"\nFull pipeline starting for: {inputs['feature_summary'][:80]}...")
-    if requirements_path_arg:
-        print(f"Customer requirements: {Path(requirements_path_arg).name}")
-    print(f"Target tool for build spec: {target_tool}")
-    print("Human review checkpoints will pause after each agent.\n")
-
     skip = getattr(args, "skip_validation", False)
-    try:
-        result = PmAgentSystem().full_pipeline_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
 
-    spec = extract_pydantic_output(result, CodingPromptOutput)
-    if spec is None:
-        print("\nError: pipeline did not return a valid CodingPromptOutput object.")
-        print("Raw output:", result)
-        sys.exit(1)
+    # --- Resume path: only Agent 3 (BRD + build spec) ---
+    if not need_research and not need_prfaq and need_brd:
+        print(f"\nResuming Agent 3 (BRD + build spec) for: {label[:80]}...")
 
-    # Save research brief if it's available in tasks_output
-    label = inputs["feature_summary"]
-    slug = _slugify(label)
-    if hasattr(result, "tasks_output"):
-        for task_output in result.tasks_output:
-            if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, ResearchOutput):
-                research_md = render_research_to_markdown(task_output.pydantic)
-                research_path = save_markdown_brief(research_md)
-                print(f"Research brief saved to: {research_path}")
-                break
+        # Find the PRFAQ and research paths from the checkpoint
+        existing_ckpt = load_checkpoint(output_dir) or {}
+        prfaq_file = existing_ckpt.get("artifacts", {}).get("prfaq", {}).get("path", "")
+        research_file = existing_ckpt.get("artifacts", {}).get("research_brief", {}).get("path", "")
+        crew_inputs["prfaq_path"] = prfaq_file
+        crew_inputs["research_path"] = research_file
 
-    # Save PRFAQ if it's available in tasks_output
-    if hasattr(result, "tasks_output"):
-        for task_output in result.tasks_output:
-            if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, PRFAQOutput):
-                prfaq = task_output.pydantic
-                prfaq_version = prfaq.version_history[-1].version if prfaq.version_history else "1.0"
-                prfaq_md = render_prfaq_to_markdown(prfaq, slug=slug)
-                prfaq_path = save_prfaq(prfaq_md, label, prfaq_version)
-                print(f"PRFAQ saved to: {prfaq_path}")
-                break
+        try:
+            result = PmAgentSystem().brd_from_prfaq_crew().kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running Agent 3: {e}")
+            sys.exit(1)
 
-    # Save BRD if it's available in tasks_output
-    if hasattr(result, "tasks_output"):
-        for task_output in result.tasks_output:
-            if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
-                brd_version = (
-                    task_output.pydantic.version_history[-1].version
-                    if task_output.pydantic.version_history else "1.0"
-                )
-                brd_md = render_brd_to_markdown(task_output.pydantic, slug=slug)
-                brd_path = save_brd(brd_md, label, brd_version)
-                print(f"BRD saved to: {brd_path}")
-                save_brd_exports(task_output.pydantic, label)
+        # Save BRD from tasks_output
+        if hasattr(result, "tasks_output"):
+            for to in result.tasks_output:
+                if hasattr(to, "pydantic") and isinstance(to.pydantic, BRDOutput):
+                    brd_version = to.pydantic.version_history[-1].version if to.pydantic.version_history else "1.0"
+                    brd_md = render_brd_to_markdown(to.pydantic, slug=slug)
+                    brd_path = save_brd(brd_md, label, brd_version)
+                    print(f"BRD saved to: {brd_path}")
+                    save_brd_exports(to.pydantic, label)
+                    record_artifact(checkpoint, "brd", str(brd_path))
+                    save_checkpoint(output_dir, checkpoint)
+                    break
 
+        spec = extract_pydantic_output(result, CodingPromptOutput)
+        if spec is None:
+            print("\nError: Agent 3 did not return a valid CodingPromptOutput.")
+            sys.exit(1)
+
+    else:
+        # --- Full run (or partial resume that needs Agent 1+2) ---
+        print(f"\nFull pipeline starting for: {label[:80]}...")
+        if requirements_path_arg:
+            print(f"Customer requirements: {Path(requirements_path_arg).name}")
+        print(f"Target tool for build spec: {target_tool}")
+        print("Human review checkpoints will pause after each agent.\n")
+
+        def _task_callback(task_output):
+            _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint)
+
+        try:
+            crew = PmAgentSystem().full_pipeline_crew(skip_validation=skip)
+            crew.task_callback = _task_callback
+            result = crew.kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+
+        spec = extract_pydantic_output(result, CodingPromptOutput)
+        if spec is None:
+            print("\nError: pipeline did not return a valid CodingPromptOutput object.")
+            print("Raw output:", result)
+            sys.exit(1)
+
+    # Save build spec (always the final output)
     reference_md = render_build_spec_to_markdown(spec, slug=slug)
     ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
     print(f"Build spec reference saved to: {ref_path}")
     print(f"Tool-ready formatted spec saved to: {spec_path}")
+
+    # Pipeline complete — delete checkpoint
+    delete_checkpoint(output_dir)
 
     if publish_dir:
         try:
@@ -858,6 +957,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_full.add_argument(
         "--requirements-path",
         help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
+    )
+    p_full.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from the last checkpoint if input hasn't changed",
+    )
+    p_full.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Delete any existing checkpoint and run everything from scratch",
     )
     p_full.set_defaults(func=cmd_full_pipeline)
 

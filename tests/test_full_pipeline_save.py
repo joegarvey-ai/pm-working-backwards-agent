@@ -161,7 +161,18 @@ def test_full_pipeline_saves_all_artifacts(output_dir, example_input):
 
     with patch("pm_agent_system.main.PmAgentSystem") as MockCrew:
         instance = MockCrew.return_value
-        instance.full_pipeline_crew.return_value.kickoff.return_value = mock_result
+        crew_mock = MagicMock()
+
+        # When kickoff is called, trigger the task_callback for each task output
+        # to simulate what CrewAI does during a real run.
+        def _kickoff_with_callbacks(**kwargs):
+            if crew_mock.task_callback:
+                for task_output in mock_result.tasks_output:
+                    crew_mock.task_callback(task_output)
+            return mock_result
+
+        crew_mock.kickoff.side_effect = _kickoff_with_callbacks
+        instance.full_pipeline_crew.return_value = crew_mock
 
         from pm_agent_system.main import cmd_full_pipeline
 
@@ -170,6 +181,8 @@ def test_full_pipeline_saves_all_artifacts(output_dir, example_input):
             target_tool="kiro",
             requirements_path=None,
             skip_validation=False,
+            resume=False,
+            fresh=False,
         )
         cmd_full_pipeline(args)
 
