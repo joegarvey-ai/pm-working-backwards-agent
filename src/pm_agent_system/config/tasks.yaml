@@ -431,6 +431,18 @@ generate_brd_chained:
        every requirement must trace back to the PRFAQ, the research, or
        the PM's known constraints.
 
+    2a. **Use the competitive analysis from the research brief.** Read
+       the competitive analysis section of the research brief. Reference
+       each named competitor by name in the solution rationale section.
+       Identify at least one point of differentiation for each named
+       competitor: something we do that they do not, or something they
+       do that we must match. In the proposed solution overview and
+       problem statement sections, cite each competitor by name rather
+       than referring to "competitors" generically. If the research
+       identified strengths or weaknesses from user reviews, reference
+       those in the solution rationale to explain why the proposed
+       approach is better or where it must reach parity.
+
     3. **Apply the AWS-first rule.** All architecture references default
        to AWS services (Lambda, DynamoDB, Cognito, API Gateway, S3,
        CloudFront, SNS/SQS/EventBridge, Bedrock). Do not reference
@@ -719,6 +731,15 @@ generate_brd_standalone:
 
     3. **If {research_path} is non-empty, read it as well** for the
        underlying market and customer evidence.
+
+    3a. **Use the competitive analysis from the research brief.** Read
+       the competitive analysis section of the research brief. Reference
+       each named competitor by name in the solution rationale section.
+       Identify at least one point of differentiation for each named
+       competitor: something we do that they do not, or something they
+       do that we must match. In the proposed solution overview and
+       problem statement sections, cite each competitor by name rather
+       than referring to "competitors" generically.
 
     4. **Apply the AWS-first rule.** All architecture references default
        to AWS services (Lambda, DynamoDB, Cognito, API Gateway, S3,
