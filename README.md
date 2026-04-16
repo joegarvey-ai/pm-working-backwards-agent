@@ -85,6 +85,10 @@ This system runs in multiple environments. Choose the one that fits your workflo
 
 Each command pauses for your review before producing the next artifact. See the [CLI Commands](#cli-commands) section below for full details, or the [Platform Support](#platform-support) section for non-CLI options.
 
+### Reviewing Output
+
+Every artifact is written to `output/` in two formats: a `.md` file for editing and version control, and a `.html` file for browser viewing. The HTML files are self-contained — you can email them, share them over Slack, or open them offline. Add `--open` to any pipeline command to auto-launch the HTML when the run finishes.
+
 ## CLI commands
 
 | Command | What it does |

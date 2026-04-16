@@ -39,6 +39,7 @@ from pm_agent_system.checkpoint import (
     save_checkpoint,
 )
 from pm_agent_system.crew import PmAgentSystem, _MODEL
+from pm_agent_system.html_export import markdown_to_html
 from pm_agent_system.pricing import estimate_cost, format_cost_summary
 from pm_agent_system.models import (
     VALID_TARGET_TOOLS,
@@ -58,6 +59,8 @@ from pm_agent_system.utils import (
 )
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+
+import webbrowser
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +205,8 @@ def save_markdown_brief(markdown: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = _output_dir() / f"research_brief_{timestamp}.md"
     path.write_text(markdown, encoding="utf-8")
+    html_path = path.with_suffix(".html")
+    html_path.write_text(markdown_to_html(markdown, title="Research Brief"), encoding="utf-8")
     return path
 
 
@@ -210,6 +215,8 @@ def save_prfaq(markdown: str, feature_summary: str, version: str) -> Path:
     slug = _slugify(feature_summary) or "prfaq"
     path = _output_dir() / f"prfaq_{slug}_v{version}.md"
     path.write_text(markdown, encoding="utf-8")
+    html_path = path.with_suffix(".html")
+    html_path.write_text(markdown_to_html(markdown, title="PRFAQ"), encoding="utf-8")
     return path
 
 
@@ -226,6 +233,8 @@ def save_brd(markdown: str, label: str, version: str) -> Path:
     slug = _slugify(label) or "brd"
     path = _output_dir() / f"brd_{slug}_v{version}.md"
     path.write_text(markdown, encoding="utf-8")
+    html_path = path.with_suffix(".html")
+    html_path.write_text(markdown_to_html(markdown, title="Business Requirements Document"), encoding="utf-8")
     return path
 
 
@@ -354,6 +363,11 @@ def cmd_research(args: argparse.Namespace) -> None:
         except Exception as e:
             print(f"Warning: Failed to publish to {publish_dir}: {e}")
 
+    if getattr(args, "open", False):
+        html_path = working_copy.with_suffix(".html")
+        if html_path.exists():
+            webbrowser.open(html_path.as_uri())
+
 
 # ---------- Subcommand: generate (Mode 1) ----------
 
@@ -396,6 +410,11 @@ def cmd_generate(args: argparse.Namespace) -> None:
             print(f"Published approved PRFAQ to: {published}")
         except Exception as e:
             print(f"Warning: Failed to publish to {publish_dir}: {e}")
+
+    if getattr(args, "open", False):
+        html_path = working_copy.with_suffix(".html")
+        if html_path.exists():
+            webbrowser.open(html_path.as_uri())
 
 
 # ---------- Subcommand: revise (Mode 2) ----------
@@ -727,6 +746,15 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         except Exception as e:
             print(f"Warning: publish failed: {e}")
 
+    # --open: launch the final HTML artifact in the default browser
+    if getattr(args, "open", False):
+        # Find the most recently written BRD HTML, falling back to the build spec
+        html_candidates = sorted(output_dir.glob("brd_*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not html_candidates:
+            html_candidates = sorted(output_dir.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if html_candidates:
+            webbrowser.open(html_candidates[0].as_uri())
+
 
 # ---------- Subcommand: brd (Agent 3, BRD + build spec from approved PRFAQ) ----------
 
@@ -801,6 +829,11 @@ def cmd_brd(args: argparse.Namespace) -> None:
     ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
     print(f"Build spec reference: {ref_path}")
     print(f"Formatted spec:       {spec_path}")
+
+    if getattr(args, "open", False):
+        html_candidates = sorted(_output_dir().glob("brd_*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if html_candidates:
+            webbrowser.open(html_candidates[0].as_uri())
 
 
 # ---------- Subcommand: build-spec (Agent 3 Mode 3) ----------
@@ -1010,6 +1043,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_research = sub.add_parser("research", help="Run Agent 1 only (research brief)")
     p_research.add_argument("input_file", help="Path to YAML or JSON input file")
     p_research.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
+    p_research.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_research.set_defaults(func=cmd_research)
 
     p_generate = sub.add_parser(
@@ -1017,6 +1051,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_generate.add_argument("input_file", help="Path to YAML or JSON input file")
     p_generate.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
+    p_generate.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_generate.set_defaults(func=cmd_generate)
 
     p_revise = sub.add_parser("revise", help="Run Agent 2 only to revise an existing PRFAQ")
@@ -1056,6 +1091,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete any existing checkpoint and run everything from scratch",
     )
+    p_full.add_argument("--open", action="store_true", help="Open the final HTML artifact in the default browser when done")
     p_full.set_defaults(func=cmd_full_pipeline)
 
     p_brd = sub.add_parser(
@@ -1070,6 +1106,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
     )
     p_brd.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
+    p_brd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_brd.set_defaults(func=cmd_brd)
 
     p_spec = sub.add_parser(
