@@ -764,6 +764,38 @@ def cmd_clean(args: argparse.Namespace) -> None:
     print("Nothing to do. Use --list, --archive, or --delete-archive.")
 
 
+def cmd_view(args: argparse.Namespace) -> None:
+    """Launch the TUI artifact viewer."""
+    try:
+        from pm_agent_system.viewer import ArtifactViewer
+    except ImportError:
+        print(
+            "The viewer requires the [ui] extra. Install it with:\n"
+            "  uv pip install 'pm-working-backwards-agent[ui]'"
+        )
+        return
+
+    if args.serve:
+        try:
+            from textual_serve.server import Server
+        except ImportError:
+            print(
+                "Browser mode requires textual-serve. Install it with:\n"
+                "  uv pip install textual-serve"
+            )
+            return
+        server = Server(
+            f"python -m pm_agent_system.viewer {args.file or ''}",
+            host="localhost",
+            port=args.port,
+        )
+        print(f"Serving viewer at http://localhost:{args.port}")
+        server.serve()
+    else:
+        app = ArtifactViewer(initial_file=args.file)
+        app.run()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pm_agent_system")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -859,6 +891,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("old_path", help="Path to the older version")
     p_diff.add_argument("new_path", help="Path to the newer version")
     p_diff.set_defaults(func=cmd_diff)
+
+    # ----- Viewer -----
+
+    p_view = sub.add_parser(
+        "view",
+        help="Open the TUI artifact viewer (requires: uv pip install 'pm-working-backwards-agent[ui]')",
+    )
+    p_view.add_argument(
+        "file", nargs="?", default=None, help="Optional markdown file to open immediately"
+    )
+    p_view.add_argument(
+        "--serve",
+        action="store_true",
+        help="Serve the viewer in a web browser instead of the terminal",
+    )
+    p_view.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for --serve mode (default: 8000)",
+    )
+    p_view.set_defaults(func=cmd_view)
 
     return parser
 

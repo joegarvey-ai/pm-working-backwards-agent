@@ -26,6 +26,7 @@ test = "pm_agent_system.main:test"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+ui = ["textual>=1.0.0", "textual-serve>=1.1.0"]
 
 [build-system]
 requires = ["hatchling"]
