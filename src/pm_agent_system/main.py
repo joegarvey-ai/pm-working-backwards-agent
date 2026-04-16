@@ -366,7 +366,7 @@ def cmd_research(args: argparse.Namespace) -> None:
     if getattr(args, "open", False):
         html_path = working_copy.with_suffix(".html")
         if html_path.exists():
-            webbrowser.open(html_path.as_uri())
+            webbrowser.open(html_path.resolve().as_uri())
 
 
 # ---------- Subcommand: generate (Mode 1) ----------
@@ -414,7 +414,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
     if getattr(args, "open", False):
         html_path = working_copy.with_suffix(".html")
         if html_path.exists():
-            webbrowser.open(html_path.as_uri())
+            webbrowser.open(html_path.resolve().as_uri())
 
 
 # ---------- Subcommand: revise (Mode 2) ----------
@@ -753,7 +753,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         if not html_candidates:
             html_candidates = sorted(output_dir.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
         if html_candidates:
-            webbrowser.open(html_candidates[0].as_uri())
+            webbrowser.open(html_candidates[0].resolve().as_uri())
 
 
 # ---------- Subcommand: brd (Agent 3, BRD + build spec from approved PRFAQ) ----------
@@ -833,7 +833,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
     if getattr(args, "open", False):
         html_candidates = sorted(_output_dir().glob("brd_*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
         if html_candidates:
-            webbrowser.open(html_candidates[0].as_uri())
+            webbrowser.open(html_candidates[0].resolve().as_uri())
 
 
 # ---------- Subcommand: build-spec (Agent 3 Mode 3) ----------
