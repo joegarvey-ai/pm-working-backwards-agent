@@ -16,6 +16,21 @@ from pm_agent_system.tools import (
     StyleGuideLoaderTool,
     TavilySearchTool,
 )
+from crewai.llms.providers.anthropic.completion import AnthropicCompletion
+
+# Claude Sonnet 4 defaults to 4096 max output tokens in CrewAI's
+# Anthropic provider.  The BRD (12 sections + code samples + Mermaid
+# diagrams) and build spec (formatted_spec alone can be 3-5K tokens)
+# regularly exceed that limit, causing truncated JSON and Pydantic
+# validation failures.  We bump to 16384 for agents that produce
+# large structured outputs.
+_MODEL = "claude-sonnet-4-20250514"
+_DEFAULT_MAX_TOKENS = 8192
+_LARGE_MAX_TOKENS = 16384
+
+
+def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS) -> AnthropicCompletion:
+    return AnthropicCompletion(model=_MODEL, max_tokens=max_tokens)
 
 
 @CrewBase
@@ -50,7 +65,7 @@ class PmAgentSystem:
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
             ],
-            llm="anthropic/claude-sonnet-4-20250514",
+            llm=_llm(_DEFAULT_MAX_TOKENS),
             verbose=True,
         )
 
@@ -64,7 +79,7 @@ class PmAgentSystem:
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
             ],
-            llm="anthropic/claude-sonnet-4-20250514",
+            llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )
 
@@ -83,7 +98,7 @@ class PmAgentSystem:
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
             ],
-            llm="anthropic/claude-sonnet-4-20250514",
+            llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )
 
