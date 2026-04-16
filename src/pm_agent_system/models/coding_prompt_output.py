@@ -48,5 +48,6 @@ class CodingPromptOutput(BaseModel):
     )
     target_tool: str = Field(description="kiro, claude_code, cursor, or lovable")
     formatted_spec: str = Field(
+        default="",
         description="The complete tool-specific output ready to paste or load into the chosen tool"
     )
