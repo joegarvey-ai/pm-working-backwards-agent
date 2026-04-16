@@ -38,9 +38,10 @@ class CodingPromptOutput(BaseModel):
         description="AWS-specific constraints carried from BRD"
     )
     architecture_reference: str = Field(
+        default="",
         description="Mermaid diagram + description of target architecture"
     )
-    current_state_context: str
+    current_state_context: str = Field(default="")
     out_of_scope: list[str] = Field(
         default_factory=list,
         description="P2 items and constraint-driven exclusions. The coding tool must not build these."

@@ -111,10 +111,11 @@ class BRDOutput(BaseModel):
     functional_requirements: list[FunctionalRequirement] = Field(default_factory=list, min_length=3)
     non_functional_requirements: list[NonFunctionalRequirement] = Field(default_factory=list, min_length=2)
     technical_context_and_dependencies: str = Field(
+        default="",
         description="Includes a Mermaid diagram of the current state inline"
     )
     cost_flags: list[CostFlag] = Field(default_factory=list)
     risks: list[Risk] = Field(default_factory=list, min_length=2)
     success_metrics: list[SuccessMetric] = Field(default_factory=list, min_length=1)
-    timeline_and_milestones: str
+    timeline_and_milestones: str = Field(default="")
     version_history: list[VersionEntry] = Field(default_factory=list, min_length=1)
