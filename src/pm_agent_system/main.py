@@ -493,9 +493,29 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         print("Raw output:", result)
         sys.exit(1)
 
-    # Save BRD if it's available in tasks_output
+    # Save research brief if it's available in tasks_output
     label = inputs["feature_summary"]
     slug = _slugify(label)
+    if hasattr(result, "tasks_output"):
+        for task_output in result.tasks_output:
+            if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, ResearchOutput):
+                research_md = render_research_to_markdown(task_output.pydantic)
+                research_path = save_markdown_brief(research_md)
+                print(f"Research brief saved to: {research_path}")
+                break
+
+    # Save PRFAQ if it's available in tasks_output
+    if hasattr(result, "tasks_output"):
+        for task_output in result.tasks_output:
+            if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, PRFAQOutput):
+                prfaq = task_output.pydantic
+                prfaq_version = prfaq.version_history[-1].version if prfaq.version_history else "1.0"
+                prfaq_md = render_prfaq_to_markdown(prfaq, slug=slug)
+                prfaq_path = save_prfaq(prfaq_md, label, prfaq_version)
+                print(f"PRFAQ saved to: {prfaq_path}")
+                break
+
+    # Save BRD if it's available in tasks_output
     if hasattr(result, "tasks_output"):
         for task_output in result.tasks_output:
             if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
