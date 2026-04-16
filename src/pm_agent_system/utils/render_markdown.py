@@ -1,4 +1,5 @@
 from pm_agent_system.models import ResearchOutput
+from pm_agent_system.output_inspector import find_defaulted_empty_fields, format_warning_block
 
 
 def render_research_to_markdown(output: ResearchOutput) -> str:
@@ -8,6 +9,12 @@ def render_research_to_markdown(output: ResearchOutput) -> str:
     typed fields instead of raw LLM text.
     """
     lines: list[str] = []
+
+    empty_fields = find_defaulted_empty_fields(output)
+    warning = format_warning_block(empty_fields)
+    if warning:
+        lines.append(warning)
+        lines.append("")
 
     lines.append("# Research Brief")
     lines.append("")

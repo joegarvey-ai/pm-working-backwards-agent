@@ -1,6 +1,7 @@
 from datetime import date
 
 from pm_agent_system.models import CodingPromptOutput
+from pm_agent_system.output_inspector import find_defaulted_empty_fields, format_warning_block
 
 # File extension per target tool. Lovable gets .txt for natural-language pasting;
 # everything else stays markdown for now.
@@ -25,6 +26,9 @@ def render_build_spec_to_markdown(
     The formatted_spec itself is written separately as the tool-ready file.
     """
     today = date.today().isoformat()
+    empty_fields = find_defaulted_empty_fields(output)
+    warning = format_warning_block(empty_fields)
+
     lines: list[str] = [
         "---",
         "type: build_spec",
@@ -34,6 +38,13 @@ def render_build_spec_to_markdown(
         f'created: "{today}"',
         "---",
         "",
+    ]
+
+    if warning:
+        lines.append(warning)
+        lines.append("")
+
+    lines += [
         "# Build Spec",
         "",
         f"**Target tool:** {output.target_tool}",

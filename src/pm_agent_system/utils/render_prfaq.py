@@ -1,6 +1,7 @@
 from datetime import date
 
 from pm_agent_system.models import PRFAQOutput
+from pm_agent_system.output_inspector import find_defaulted_empty_fields, format_warning_block
 
 
 def render_prfaq_to_markdown(output: PRFAQOutput, slug: str = "") -> str:
@@ -16,6 +17,9 @@ def render_prfaq_to_markdown(output: PRFAQOutput, slug: str = "") -> str:
     last_updated = latest.date if latest else date.today().isoformat()
     created = output.version_history[0].date if output.version_history else last_updated
 
+    empty_fields = find_defaulted_empty_fields(output)
+    warning = format_warning_block(empty_fields)
+
     lines: list[str] = [
         "---",
         "type: prfaq",
@@ -27,6 +31,10 @@ def render_prfaq_to_markdown(output: PRFAQOutput, slug: str = "") -> str:
         "---",
         "",
     ]
+
+    if warning:
+        lines.append(warning)
+        lines.append("")
 
     lines.append("# PRFAQ")
     lines.append("")

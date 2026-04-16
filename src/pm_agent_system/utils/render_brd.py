@@ -1,6 +1,7 @@
 from datetime import date
 
 from pm_agent_system.models import BRDOutput
+from pm_agent_system.output_inspector import find_defaulted_empty_fields, format_warning_block
 
 
 def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
@@ -22,6 +23,10 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
     last_updated = latest.date if latest else date.today().isoformat()
     created = output.version_history[0].date if output.version_history else last_updated
 
+    # Check for incomplete output
+    empty_fields = find_defaulted_empty_fields(output)
+    warning = format_warning_block(empty_fields)
+
     lines: list[str] = [
         "---",
         "type: brd",
@@ -32,6 +37,13 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
         f'author: "{author}"',
         "---",
         "",
+    ]
+
+    if warning:
+        lines.append(warning)
+        lines.append("")
+
+    lines += [
         "# Business Requirements Document",
         "",
     ]
@@ -73,11 +85,14 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
             lines.append("")
 
     lines += ["## 6. Non-Functional Requirements", ""]
-    nfr_rows = [
-        [nfr.id, nfr.category, nfr.description, "; ".join(nfr.acceptance_criteria)]
-        for nfr in output.non_functional_requirements
-    ]
-    lines += _table(["ID", "Category", "Description", "Acceptance Criteria"], nfr_rows)
+    if output.non_functional_requirements:
+        nfr_rows = [
+            [nfr.id, nfr.category, nfr.description, "; ".join(nfr.acceptance_criteria)]
+            for nfr in output.non_functional_requirements
+        ]
+        lines += _table(["ID", "Category", "Description", "Acceptance Criteria"], nfr_rows)
+    else:
+        lines.append("_Not generated in this run._")
     lines.append("")
 
     lines += [
@@ -116,8 +131,11 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
     lines.append("")
 
     lines += ["## 9. Risks", ""]
-    risk_rows = [[r.description, r.likelihood, r.impact, r.mitigation] for r in output.risks]
-    lines += _table(["Description", "Likelihood", "Impact", "Mitigation"], risk_rows)
+    if output.risks:
+        risk_rows = [[r.description, r.likelihood, r.impact, r.mitigation] for r in output.risks]
+        lines += _table(["Description", "Likelihood", "Impact", "Mitigation"], risk_rows)
+    else:
+        lines.append("_Not generated in this run._")
     lines.append("")
 
     lines += ["## 10. Success Metrics", ""]
@@ -128,7 +146,12 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
     lines += _table(["Metric", "Target", "Measurement", "Timeline"], sm_rows)
     lines.append("")
 
-    lines += ["## 11. Timeline and Milestones", "", output.timeline_and_milestones, ""]
+    lines += ["## 11. Timeline and Milestones", ""]
+    if output.timeline_and_milestones:
+        lines.append(output.timeline_and_milestones)
+    else:
+        lines.append("_Not generated in this run._")
+    lines.append("")
 
     lines += ["## 12. Version History", ""]
     vh_rows = [[v.version, v.date, v.author, v.changes] for v in output.version_history]
