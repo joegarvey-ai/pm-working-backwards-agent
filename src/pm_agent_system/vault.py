@@ -437,6 +437,138 @@ def write_to_vault(
         return ""
 
 
+# ---------- Version handling ----------
+
+
+def get_next_version(
+    artifact_type: str,
+    product_slug: str,
+    vault_config: VaultConfig,
+) -> str:
+    """Determine the next version string for an artifact type.
+
+    Scans the vault folder for existing version files and returns
+    the next minor version. Returns "1.0" if none exist.
+    """
+    folder = Path(vault_config.vault_path) / vault_config.folder_prefix / product_slug
+    if not folder.exists():
+        return "1.0"
+
+    pattern = f"{artifact_type}_v*.md"
+    matches = sorted(folder.glob(pattern))
+    if not matches:
+        return "1.0"
+
+    # Parse version numbers from filenames
+    versions: list[tuple[int, int]] = []
+    version_re = re.compile(rf"^{re.escape(artifact_type)}_v(\d+)\.(\d+)\.md$")
+    for match_path in matches:
+        m = version_re.match(match_path.name)
+        if m:
+            versions.append((int(m.group(1)), int(m.group(2))))
+
+    if not versions:
+        return "1.0"
+
+    versions.sort()
+    major, minor = versions[-1]
+    return f"{major}.{minor + 1}"
+
+
+def mark_superseded(vault_file_path: str, superseded_by: str) -> None:
+    """Mark a vault artifact as superseded by a newer version.
+
+    Adds ``superseded_by`` to the file's frontmatter and updates the
+    status to ``superseded``.
+    """
+    vp = Path(vault_file_path)
+    if not vp.exists():
+        return
+
+    try:
+        content = vp.read_text(encoding="utf-8")
+        fm_match = _FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return
+
+        fm_text = content.split("---\n")[1] if "---" in content else ""
+        fm_data = yaml.safe_load(fm_text) or {}
+        fm_data["superseded_by"] = f"[[{superseded_by}]]"
+        fm_data["status"] = "superseded"
+
+        new_fm = yaml.dump(fm_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        body_after_fm = content[fm_match.end():]
+        new_content = f"---\n{new_fm}---\n{body_after_fm}"
+        vp.write_text(new_content, encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Failed to mark %s as superseded: %s", vault_file_path, exc)
+
+
+def write_revision_to_vault(
+    markdown_content: str,
+    artifact_type: str,
+    product_slug: str,
+    vault_config: VaultConfig,
+    upstream: str | None = None,
+    downstream: str | None = None,
+) -> str:
+    """Write a revised artifact to the vault as a new version file.
+
+    - Does NOT overwrite the current version
+    - Creates a new version file with incremented version number
+    - Marks the old version as superseded
+    - Adds ``previous_version`` to the new file's frontmatter
+    - Updates ``_index.md``
+
+    Returns the new vault file path, or empty string on failure.
+    """
+    try:
+        new_version = get_next_version(artifact_type, product_slug, vault_config)
+
+        # Find the current (soon-to-be-old) version file
+        old_file = _vault_artifact_path(artifact_type, product_slug, vault_config)
+        old_filename = old_file.stem if old_file.exists() else None
+
+        # Write the new version
+        vault_path = write_to_vault(
+            markdown_content=markdown_content,
+            artifact_type=artifact_type,
+            product_slug=product_slug,
+            version=new_version,
+            vault_config=vault_config,
+            upstream=upstream,
+            downstream=downstream,
+        )
+
+        if not vault_path:
+            return ""
+
+        # Add previous_version to the new file's frontmatter
+        if old_filename:
+            new_file = Path(vault_path)
+            content = new_file.read_text(encoding="utf-8")
+            fm_match = _FRONTMATTER_RE.match(content)
+            if fm_match:
+                fm_text = content.split("---\n")[1] if "---" in content else ""
+                fm_data = yaml.safe_load(fm_text) or {}
+                fm_data["previous_version"] = f"[[{old_filename}]]"
+                new_fm = yaml.dump(fm_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                body_after_fm = content[fm_match.end():]
+                new_content = f"---\n{new_fm}---\n{body_after_fm}"
+                new_file.write_text(new_content, encoding="utf-8")
+
+            # Mark the old version as superseded
+            if old_file.exists():
+                new_filename = Path(vault_path).stem
+                mark_superseded(str(old_file), new_filename)
+
+        return vault_path
+
+    except Exception as exc:
+        logger.warning("Failed to write revision to vault (%s): %s", artifact_type, exc)
+        return ""
+
+
 # ---------- Dashboard note ----------
 
 
