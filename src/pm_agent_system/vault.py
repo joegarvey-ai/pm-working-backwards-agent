@@ -435,3 +435,80 @@ def write_to_vault(
     except Exception as exc:
         logger.warning("Failed to write vault artifact (%s): %s", artifact_type, exc)
         return ""
+
+
+# ---------- Dashboard note ----------
+
+
+def generate_index_note(
+    product_slug: str,
+    vault_config: VaultConfig,
+    input_path: str = "",
+) -> str:
+    """Create or update ``_index.md`` in the product's vault folder.
+
+    The dashboard note summarises all artifacts for a product in a table.
+    It is regenerated on every pipeline run — it is system-owned, not
+    PM-owned.  Returns the file path, or empty string on failure.
+    """
+    try:
+        folder = Path(vault_config.vault_path) / vault_config.folder_prefix / product_slug
+        folder.mkdir(parents=True, exist_ok=True)
+
+        # Build the artifact status table by reading frontmatter of each artifact.
+        rows: list[str] = []
+        for artifact_type in ARTIFACT_CHAIN:
+            display_name = ARTIFACT_DISPLAY_NAMES[artifact_type]
+            # Find the latest version file
+            latest = _vault_artifact_path(artifact_type, product_slug, vault_config)
+            if latest.exists():
+                content = latest.read_text(encoding="utf-8")
+                fm_match = _FRONTMATTER_RE.match(content)
+                version = "—"
+                status = "draft"
+                if fm_match:
+                    try:
+                        fm_text = content.split("---\n")[1] if "---" in content else ""
+                        fm_data = yaml.safe_load(fm_text) or {}
+                        version = f"v{fm_data.get('version', '1.0')}"
+                        status = fm_data.get("status", "draft")
+                    except (yaml.YAMLError, IndexError):
+                        pass
+                link_name = latest.stem
+                rows.append(f"| {display_name} | {version} | {status} | [[{link_name}]] |")
+            else:
+                rows.append(f"| {display_name} | — | — | not yet generated |")
+
+        table_header = (
+            "| Artifact | Version | Status | File |\n"
+            "|----------|---------|--------|------|"
+        )
+        table = table_header + "\n" + "\n".join(rows)
+
+        # Pretty-print the product name from the slug
+        product_name = product_slug.replace("-", " ").title()
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        fm = {
+            "title": f"{product_slug} — Dashboard",
+            "tags": ["pm-agent", product_slug, "dashboard"],
+        }
+        fm_str = yaml.dump(fm, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+        body = (
+            f"---\n{fm_str}---\n\n"
+            f"# {product_name}\n\n"
+            f"{table}\n\n"
+            f"---\n\n"
+            f"**Pipeline input:** `{input_path}`\n"
+            f"**Last run:** {timestamp}\n"
+        )
+
+        index_path = folder / "_index.md"
+        index_path.write_text(body, encoding="utf-8")
+        logger.info("Dashboard note updated: %s", index_path)
+        return str(index_path)
+
+    except Exception as exc:
+        logger.warning("Failed to generate dashboard note: %s", exc)
+        return ""
