@@ -363,6 +363,14 @@ def cmd_research(args: argparse.Namespace) -> None:
     working_copy = save_markdown_brief(markdown)
     print(f"\nResearch complete. Working copy saved to: {working_copy}")
 
+    # Vault integration
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        product_slug = get_product_slug(inputs)
+        write_to_vault(markdown, "research_brief", product_slug, "1.0", vault_cfg,
+                       downstream="prfaq")
+        generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
+
     if publish_dir:
         try:
             published = publish_output(working_copy, publish_dir, inputs["feature_summary"])
