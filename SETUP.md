@@ -159,6 +159,10 @@ cp examples/input.yaml my_input.yaml
 
 Open `my_input.yaml` in your editor and replace the contents with your own product problem. Keep the same structure (the field names like `feature_summary`, `goals`, `user_summary`). Be specific. Vague input produces vague output.
 
+Two optional fields improve Obsidian vault organization if you have vault integration enabled:
+- `product_name` — a short name used for vault folder slugs (e.g., `"Analytics Dashboard"`)
+- `initiative` — groups products into nested folders (e.g., `"Commerce Platform"`)
+
 Then run:
 
 ```bash

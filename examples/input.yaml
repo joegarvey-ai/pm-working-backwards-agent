@@ -30,12 +30,12 @@ business_context: "Current merchant dashboard adoption: 23% of active merchants 
 
 # Optional: Short product name for Obsidian vault folder names.
 # If omitted, the slug is derived from feature_summary (which can be long).
-# product_name: "Analytics Dashboard"
+product_name: "Analytics Dashboard"
 
 # Optional: Group products by initiative in the Obsidian vault.
 # Creates a nesting level: PM Agent/{initiative}/{product}/
 # If omitted, products sit directly under PM Agent/{product}/.
-# initiative: "Commerce Platform"
+initiative: "Commerce Platform"
 
 # Optional: Where to publish the approved research brief.
 # Set to any local directory path. Examples:
