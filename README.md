@@ -89,6 +89,32 @@ Each command pauses for your review before producing the next artifact. See the 
 
 Every artifact is written to `output/` in two formats: a `.md` file for editing and version control, and a `.html` file for browser viewing. The HTML files are self-contained — you can email them, share them over Slack, or open them offline. Add `--open` to any pipeline command to auto-launch the HTML when the run finishes.
 
+### Obsidian Vault Integration
+
+If you use [Obsidian](https://obsidian.md) for note-taking, artifacts can be
+written directly to your vault with frontmatter, version history, and
+wikilinks connecting the full artifact chain (research → PRFAQ → BRD → build spec).
+
+To enable:
+
+1. Set `OBSIDIAN_VAULT_PATH` in your `.env` to your vault's root directory.
+2. (Optional) Set `OBSIDIAN_FOLDER_PREFIX` to customize the top-level folder
+   name (default: `PM Agent`).
+
+Artifacts are written to `{vault}/{prefix}/{product-slug}/` with:
+- YAML frontmatter (tags, status, version, linked artifacts)
+- A dashboard note (`_index.md`) summarizing all artifacts for the product
+- Wikilinks connecting each artifact to its upstream and downstream neighbors
+- Version history — revisions create new version files rather than overwriting
+- A global map of content (`_all_products.md`) listing every product
+
+Two optional fields in your input YAML improve organization at scale:
+- `product_name` — a short name for cleaner vault folder slugs (otherwise derived from `feature_summary`)
+- `initiative` — groups products into nested folders (e.g., `PM Agent/Commerce Platform/analytics-dashboard/`)
+
+If your vault isn't set up, artifacts are still written to `output/` as usual.
+The vault is optional and additive.
+
 ## CLI commands
 
 | Command | What it does |

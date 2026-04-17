@@ -14,13 +14,19 @@ Plain-English definitions for the terms used in this project. If a term in the R
 
 **CrewAI.** An open-source Python framework for building multi-agent systems. It handles the boring parts: passing messages between agents, retrying failed steps, validating outputs. We use it so we don't have to write that infrastructure ourselves. See [crewai.com](https://www.crewai.com/).
 
+**Divergence detection.** The mechanism that detects when a PM has edited a vault artifact after the pipeline generated it. Compares a hash of the document body (stored in frontmatter as `original_hash`) against the current body content. Frontmatter-only changes (e.g., changing status from draft to approved) do not trigger divergence — only body edits do. When divergence is detected during a pipeline read, the PM is prompted to choose between the vault version and the output/ version.
+
 **Dovetail.** A UX research repository product. If your team uses Dovetail to store customer interview transcripts, the research agent can pull quotes from it. Optional. See [dovetail.com](https://dovetail.com).
+
+**Frontmatter.** A block of metadata at the top of a markdown file, enclosed in `---` lines, formatted as YAML. Obsidian uses frontmatter for tags, aliases, and custom properties. This system adds artifact type, version, status, and traceability links as frontmatter.
 
 **Human-in-the-loop checkpoint.** A pause between agents where the system stops and waits for your review. You read the output, decide if it's good enough, and either approve it (the next agent runs) or revise it (using the `revise` command). The system never auto-advances from one stage to the next without your approval.
 
 **Kiro.** A coding agent IDE built around spec-driven development. The build spec agent can format its output specifically for Kiro's expected spec structure. See [kiro.dev](https://kiro.dev).
 
 **MCP.** Model Context Protocol. A standard for letting LLMs talk to external tools and data sources. The optional Dovetail integration uses MCP under the hood.
+
+**Obsidian vault.** A folder on your computer that Obsidian uses to store notes as plain markdown files. Each vault is self-contained. In this system, setting `OBSIDIAN_VAULT_PATH` tells the pipeline to write artifact copies into your vault for easy editing and navigation.
 
 **Orchestrator.** The piece of code that decides which agent runs when, and passes the output of one agent to the next. In this project, CrewAI is the orchestrator.
 
@@ -31,6 +37,8 @@ Plain-English definitions for the terms used in this project. If a term in the R
 **Reconciliation (requirements).** When you provide a pre-existing requirements file via `--requirements-path`, Agent 3 compares your requirements against the approved PRFAQ. Requirements that align are kept. Requirements that contradict the PRFAQ are flagged. Gaps in your list (requirements implied by the PRFAQ but not in your file) are filled by the agent and marked as "agent-generated."
 
 **Tavily.** A web search API designed for LLMs. The research agent uses it to find market data, competitor information, and customer reviews on the public internet. See [tavily.com](https://tavily.com).
+
+**Wikilink.** A link between notes in Obsidian, written as `[[note name]]`. This system uses wikilinks to connect the artifact chain so you can navigate from research to PRFAQ to BRD to build spec using Obsidian's graph view.
 
 **Working Backwards.** A product development approach where you start from the customer experience and work backward to the technology required to deliver it. The PRFAQ is the primary artifact of this process. This system automates the first draft of the Working Backwards artifacts.
 
