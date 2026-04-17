@@ -59,6 +59,7 @@ from pm_agent_system.utils import (
 )
 from pm_agent_system.vault import (
     generate_index_note,
+    get_initiative,
     get_product_slug,
     get_vault_config,
     write_revision_to_vault,
@@ -154,6 +155,15 @@ def validate_publish_destination(destination: str) -> Path | None:
 
 def _slugify(text: str, max_len: int = 50) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in text[:max_len]).strip("_")
+
+
+def _vault_for_inputs(inputs: dict):
+    """Return (vault_config, product_slug) with initiative set, or (None, '')."""
+    vault_cfg = get_vault_config()
+    if not vault_cfg:
+        return None, ""
+    vault_cfg.initiative = get_initiative(inputs)
+    return vault_cfg, get_product_slug(inputs)
 
 
 def _output_dir() -> Path:
@@ -364,9 +374,8 @@ def cmd_research(args: argparse.Namespace) -> None:
     print(f"\nResearch complete. Working copy saved to: {working_copy}")
 
     # Vault integration
-    vault_cfg = get_vault_config()
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
     if vault_cfg:
-        product_slug = get_product_slug(inputs)
         write_to_vault(markdown, "research_brief", product_slug, "1.0", vault_cfg,
                        downstream="prfaq")
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
@@ -420,9 +429,8 @@ def cmd_generate(args: argparse.Namespace) -> None:
     print(f"\nPRFAQ complete. Working copy saved to: {working_copy}")
 
     # Vault integration
-    vault_cfg = get_vault_config()
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
     if vault_cfg:
-        product_slug = get_product_slug(inputs)
         write_to_vault(markdown, "prfaq", product_slug, initial_version, vault_cfg,
                        upstream="research_brief", downstream="brd")
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
@@ -498,7 +506,8 @@ def cmd_revise(args: argparse.Namespace) -> None:
     # Vault integration — write revision as new version
     vault_cfg = get_vault_config()
     if vault_cfg:
-        product_slug = label.lower().replace("_", "-")
+        product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+        vault_cfg.initiative = fm.get("initiative", "")
         write_revision_to_vault(markdown, "prfaq", product_slug, vault_cfg,
                                 upstream="research_brief", downstream="brd")
         generate_index_note(product_slug, vault_cfg)
@@ -699,8 +708,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         save_checkpoint(output_dir, checkpoint)
 
     # Vault integration setup
-    vault_cfg = get_vault_config()
-    product_slug = get_product_slug(inputs) if vault_cfg else ""
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
 
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
     crew_inputs.update({
@@ -864,8 +872,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
 
     label = inputs["feature_summary"]
     slug = _slugify(label)
-    vault_cfg = get_vault_config()
-    product_slug = get_product_slug(inputs) if vault_cfg else ""
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
 
     if hasattr(result, "tasks_output"):
         for task_output in result.tasks_output:
@@ -948,6 +955,7 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
     vault_cfg = get_vault_config()
     if vault_cfg:
         product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+        vault_cfg.initiative = fm.get("initiative", "")
         write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
                        upstream="brd")
         generate_index_note(product_slug, vault_cfg)
@@ -1008,6 +1016,7 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
     vault_cfg = get_vault_config()
     if vault_cfg:
         product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+        vault_cfg.initiative = fm.get("initiative", "")
         write_revision_to_vault(markdown, "brd", product_slug, vault_cfg,
                                 upstream="prfaq", downstream="build_spec")
         generate_index_note(product_slug, vault_cfg)

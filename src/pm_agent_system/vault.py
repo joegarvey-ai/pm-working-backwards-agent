@@ -50,6 +50,7 @@ ARTIFACT_CHAIN = ["research_brief", "prfaq", "brd", "build_spec"]
 class VaultConfig:
     vault_path: str
     folder_prefix: str  # default "PM Agent"
+    initiative: str = ""  # optional nesting level between prefix and product slug
 
 
 @dataclass
@@ -87,6 +88,18 @@ def get_vault_config() -> VaultConfig | None:
     return VaultConfig(vault_path=vault_path, folder_prefix=folder_prefix)
 
 
+def _product_folder(product_slug: str, vault_config: VaultConfig) -> Path:
+    """Compute the vault folder for a product, respecting initiative nesting.
+
+    With initiative:  {vault_path}/{prefix}/{initiative}/{product_slug}/
+    Without:          {vault_path}/{prefix}/{product_slug}/
+    """
+    base = Path(vault_config.vault_path) / vault_config.folder_prefix
+    if vault_config.initiative:
+        return base / vault_config.initiative / product_slug
+    return base / product_slug
+
+
 # ---------- Hashing ----------
 
 
@@ -114,6 +127,7 @@ def build_frontmatter(
     body_hash: str,
     upstream: str | None,
     downstream: str | None,
+    initiative: str = "",
 ) -> dict:
     """Construct the YAML frontmatter dict for a vault artifact."""
     display_name = ARTIFACT_DISPLAY_NAMES.get(artifact_type, artifact_type)
@@ -131,6 +145,10 @@ def build_frontmatter(
         "tags": ["pm-agent", product_slug, artifact_type],
         "aliases": [f"{product_slug} {display_name}"],
     }
+
+    if initiative:
+        fm["initiative"] = initiative
+        fm["tags"].append(initiative)
 
     if upstream:
         fm["upstream"] = f"[[{upstream}]]"
@@ -343,7 +361,7 @@ def _vault_artifact_path(
     If version is given, looks for the exact version file.
     Otherwise, finds the latest version file for the artifact type.
     """
-    folder = Path(vault_config.vault_path) / vault_config.folder_prefix / product_slug
+    folder = _product_folder(product_slug, vault_config)
 
     if version:
         return folder / f"{artifact_type}_v{version}.md"
@@ -365,15 +383,35 @@ def _vault_artifact_path(
 def get_product_slug(input_config: dict) -> str:
     """Extract a filesystem-safe slug from the input YAML.
 
-    Uses the feature_summary field, lowercased, with spaces replaced by
-    hyphens and special characters removed.
+    Prefers ``product_name`` (short, human-chosen) over ``feature_summary``
+    (which can be a full sentence). Lowercased, spaces to hyphens, special
+    characters removed.
     """
-    name = input_config.get("feature_summary", "unknown")
+    name = (
+        input_config.get("product_name", "").strip()
+        or input_config.get("feature_summary", "unknown")
+    )
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
     slug = re.sub(r"[\s_]+", "-", slug)
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug[:50] if slug else "unknown"
+
+
+def get_initiative(input_config: dict) -> str:
+    """Extract an optional initiative/category for folder nesting.
+
+    Returns an empty string if not set — callers use this to decide
+    whether to add a nesting level.
+    """
+    raw = input_config.get("initiative", "").strip()
+    if not raw:
+        return ""
+    slug = raw.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug[:50] if slug else ""
 
 
 # ---------- Core write ----------
@@ -409,6 +447,7 @@ def write_to_vault(
             body_hash=body_hash,
             upstream=upstream_file,
             downstream=downstream_file,
+            initiative=vault_config.initiative,
         )
 
         content = inject_frontmatter(markdown_content, fm)
@@ -420,7 +459,7 @@ def write_to_vault(
         )
 
         # Create vault folder
-        folder = Path(vault_config.vault_path) / vault_config.folder_prefix / product_slug
+        folder = _product_folder(product_slug, vault_config)
         folder.mkdir(parents=True, exist_ok=True)
 
         # Write the file
@@ -450,7 +489,7 @@ def get_next_version(
     Scans the vault folder for existing version files and returns
     the next minor version. Returns "1.0" if none exist.
     """
-    folder = Path(vault_config.vault_path) / vault_config.folder_prefix / product_slug
+    folder = _product_folder(product_slug, vault_config)
     if not folder.exists():
         return "1.0"
 
@@ -584,7 +623,7 @@ def generate_index_note(
     PM-owned.  Returns the file path, or empty string on failure.
     """
     try:
-        folder = Path(vault_config.vault_path) / vault_config.folder_prefix / product_slug
+        folder = _product_folder(product_slug, vault_config)
         folder.mkdir(parents=True, exist_ok=True)
 
         # Build the artifact status table by reading frontmatter of each artifact.
@@ -639,8 +678,110 @@ def generate_index_note(
         index_path = folder / "_index.md"
         index_path.write_text(body, encoding="utf-8")
         logger.info("Dashboard note updated: %s", index_path)
+
+        # Also update the global MOC
+        generate_all_products_note(vault_config)
+
         return str(index_path)
 
     except Exception as exc:
         logger.warning("Failed to generate dashboard note: %s", exc)
+        return ""
+
+
+# ---------- Global MOC (Map of Content) ----------
+
+
+def generate_all_products_note(vault_config: VaultConfig) -> str:
+    """Create or update ``_all_products.md`` at the top of the PM Agent folder.
+
+    Lists every product across all initiatives in a single table, with
+    links to each product's dashboard note. Regenerated on every run.
+    Returns the file path, or empty string on failure.
+    """
+    try:
+        base = Path(vault_config.vault_path) / vault_config.folder_prefix
+        if not base.exists():
+            return ""
+
+        # Discover all product folders (they contain _index.md)
+        products: list[dict] = []
+        for index_file in sorted(base.rglob("_index.md")):
+            product_folder = index_file.parent
+            product_slug = product_folder.name
+
+            # Determine initiative from folder structure
+            relative = product_folder.relative_to(base)
+            parts = relative.parts
+            initiative = parts[0] if len(parts) > 1 else "—"
+
+            # Read the index to get last-run timestamp and artifact count
+            content = index_file.read_text(encoding="utf-8")
+            last_run = "—"
+            artifact_count = 0
+            for line in content.splitlines():
+                if line.startswith("**Last run:**"):
+                    last_run = line.split("**Last run:**")[1].strip()
+                    # Truncate to date only for readability
+                    if "T" in last_run:
+                        last_run = last_run.split("T")[0]
+                if "[[" in line and "|" in line and "not yet generated" not in line:
+                    artifact_count += 1
+
+            products.append({
+                "slug": product_slug,
+                "name": product_slug.replace("-", " ").title(),
+                "initiative": initiative,
+                "artifacts": artifact_count,
+                "last_run": last_run,
+                "folder": str(product_folder.relative_to(base)),
+            })
+
+        if not products:
+            return ""
+
+        # Group by initiative
+        initiatives: dict[str, list[dict]] = {}
+        for p in products:
+            initiatives.setdefault(p["initiative"], []).append(p)
+
+        # Build the note
+        timestamp = datetime.now(timezone.utc).isoformat()
+        fm = {
+            "title": "All Products — PM Agent",
+            "tags": ["pm-agent", "moc"],
+        }
+        fm_str = yaml.dump(fm, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+        sections: list[str] = []
+        for init_name, prods in sorted(initiatives.items()):
+            if init_name != "—":
+                sections.append(f"## {init_name.replace('-', ' ').title()}\n")
+            else:
+                sections.append("## Ungrouped\n")
+
+            sections.append("| Product | Artifacts | Last Run | Dashboard |")
+            sections.append("|---------|-----------|----------|-----------|")
+            for p in sorted(prods, key=lambda x: x["name"]):
+                dashboard_link = f"[[{p['folder']}/_index|{p['name']}]]"
+                sections.append(
+                    f"| {p['name']} | {p['artifacts']}/4 | {p['last_run']} | {dashboard_link} |"
+                )
+            sections.append("")
+
+        body = (
+            f"---\n{fm_str}---\n\n"
+            f"# All Products\n\n"
+            f"{chr(10).join(sections)}\n"
+            f"---\n\n"
+            f"**Last updated:** {timestamp}\n"
+        )
+
+        moc_path = base / "_all_products.md"
+        moc_path.write_text(body, encoding="utf-8")
+        logger.info("Global MOC updated: %s", moc_path)
+        return str(moc_path)
+
+    except Exception as exc:
+        logger.warning("Failed to generate all-products MOC: %s", exc)
         return ""

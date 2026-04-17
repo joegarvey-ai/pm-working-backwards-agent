@@ -28,6 +28,15 @@ internal_context: ""
 
 business_context: "Current merchant dashboard adoption: 23% of active merchants view the weekly PDF report. Monthly support tickets about reporting: ~200/month. Merchant churn rate: 4.2%/month (industry benchmark: 3.1%). Average time from merchant signup to first report view: 11 days. No self-service filtering. Merchants must email support to get SKU-level data. Shopify integration covers 68% of merchant base; WooCommerce covers 27%."
 
+# Optional: Short product name for Obsidian vault folder names.
+# If omitted, the slug is derived from feature_summary (which can be long).
+# product_name: "Analytics Dashboard"
+
+# Optional: Group products by initiative in the Obsidian vault.
+# Creates a nesting level: PM Agent/{initiative}/{product}/
+# If omitted, products sit directly under PM Agent/{product}/.
+# initiative: "Commerce Platform"
+
 # Optional: Where to publish the approved research brief.
 # Set to any local directory path. Examples:
 #   "~/Desktop/research_briefs"
