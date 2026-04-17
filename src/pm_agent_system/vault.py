@@ -258,13 +258,11 @@ def detect_divergence(vault_file_path: str, output_path: str = "") -> Divergence
     generated_at = None
     if fm_match:
         try:
-            fm_data = yaml.safe_load(fm_match.group()) or {}
-            # yaml.safe_load on "---\n...\n---\n" returns the inner dict
-            if isinstance(fm_data, str):
-                fm_data = yaml.safe_load(content.split("---\n")[1]) or {}
+            fm_text = content.split("---\n")[1] if "---" in content else ""
+            fm_data = yaml.safe_load(fm_text) or {}
             original_hash = fm_data.get("original_hash")
             generated_at = fm_data.get("pipeline_run")
-        except yaml.YAMLError:
+        except (yaml.YAMLError, IndexError):
             pass
 
     if original_hash is None:
