@@ -106,14 +106,35 @@ def _product_folder(product_slug: str, vault_config: VaultConfig) -> Path:
 _FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
 
 
+def strip_frontmatter(markdown_content: str) -> str:
+    """Remove YAML frontmatter from markdown content.
+
+    Returns the body only — everything after the closing ``---``.
+    If no frontmatter is present, returns the content unchanged.
+    Also strips the traceability callout line if present (starts with ``> **Artifact chain:**``).
+    """
+    body = _FRONTMATTER_RE.sub("", markdown_content, count=1)
+    # Strip the traceability callout line injected by vault writes
+    lines = body.split("\n")
+    cleaned = [line for line in lines if not line.startswith("> **Artifact chain:**")]
+    result = "\n".join(cleaned)
+    # Remove leading blank lines left after stripping
+    return result.lstrip("\n")
+
+
 def compute_body_hash(markdown_content: str) -> str:
     """SHA-256 hash of the document body (everything below YAML frontmatter).
 
     If no frontmatter exists, hashes the entire content. This ensures that
     frontmatter-only edits (e.g. changing status from draft to approved)
-    do NOT register as divergence.
+    do NOT register as divergence. Also strips the traceability callout
+    line so that vault-injected metadata doesn't affect the hash.
     """
     body = _FRONTMATTER_RE.sub("", markdown_content, count=1)
+    # Strip traceability callout so it doesn't affect the hash
+    lines = body.split("\n")
+    lines = [line for line in lines if not line.startswith("> **Artifact chain:**")]
+    body = "\n".join(lines).lstrip("\n")
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 

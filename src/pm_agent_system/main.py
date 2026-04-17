@@ -62,6 +62,8 @@ from pm_agent_system.vault import (
     get_initiative,
     get_product_slug,
     get_vault_config,
+    resolve_artifact_path,
+    strip_frontmatter,
     write_revision_to_vault,
     write_to_vault,
 )
@@ -462,6 +464,18 @@ def cmd_revise(args: argparse.Namespace) -> None:
         print(f"Error: PRFAQ file not found: {prfaq_path}")
         sys.exit(1)
 
+    # Vault read resolution: prefer vault copy if PM edited it there
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        fm = read_frontmatter(prfaq_path)
+        slug = fm.get("product_slug") or re.sub(r"_v\d+\.\d+$", "", prfaq_path.stem.replace("prfaq_", ""))
+        vault_cfg.initiative = fm.get("initiative", "")
+        try:
+            resolved = resolve_artifact_path("prfaq", slug, vault_cfg, str(prfaq_path))
+            prfaq_path = Path(resolved)
+        except FileNotFoundError:
+            pass  # fall through to the user-provided path
+
     current_version = read_current_version(prfaq_path)
     next_version = bump_version(current_version)
 
@@ -728,6 +742,16 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         existing_ckpt = load_checkpoint(output_dir) or {}
         prfaq_file = existing_ckpt.get("artifacts", {}).get("prfaq", {}).get("path", "")
         research_file = existing_ckpt.get("artifacts", {}).get("research_brief", {}).get("path", "")
+        # Vault read resolution: prefer vault copies if PM edited them
+        if vault_cfg and product_slug:
+            try:
+                prfaq_file = resolve_artifact_path("prfaq", product_slug, vault_cfg, prfaq_file)
+            except FileNotFoundError:
+                pass
+            try:
+                research_file = resolve_artifact_path("research_brief", product_slug, vault_cfg, research_file)
+            except FileNotFoundError:
+                pass
         crew_inputs["prfaq_path"] = prfaq_file
         crew_inputs["research_path"] = research_file
 
@@ -829,6 +853,14 @@ def cmd_brd(args: argparse.Namespace) -> None:
         print(f"Error: PRFAQ file not found: {prfaq_path}")
         sys.exit(1)
 
+    # Vault read resolution: prefer vault copy if PM edited it there
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
+    if vault_cfg and product_slug:
+        try:
+            prfaq_path = Path(resolve_artifact_path("prfaq", product_slug, vault_cfg, str(prfaq_path)))
+        except FileNotFoundError:
+            pass
+
     research_path_arg = ""
     if args.research_path:
         rp = Path(args.research_path).expanduser().resolve()
@@ -918,6 +950,17 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
         print(f"Error: BRD file not found: {brd_path}")
         sys.exit(1)
 
+    # Vault read resolution: prefer vault copy if PM edited it there
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        fm = read_frontmatter(brd_path)
+        slug = fm.get("product_slug") or re.sub(r"_v\d+\.\d+$", "", brd_path.stem.replace("brd_", ""))
+        vault_cfg.initiative = fm.get("initiative", "")
+        try:
+            brd_path = Path(resolve_artifact_path("brd", slug, vault_cfg, str(brd_path)))
+        except FileNotFoundError:
+            pass
+
     target_tool = (args.target_tool or os.getenv("DEFAULT_TARGET_TOOL", "kiro")).strip()
     if target_tool not in VALID_TARGET_TOOLS:
         print(f"Error: --target-tool must be one of {VALID_TARGET_TOOLS}")
@@ -973,6 +1016,17 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
     if not brd_path.exists():
         print(f"Error: BRD file not found: {brd_path}")
         sys.exit(1)
+
+    # Vault read resolution: prefer vault copy if PM edited it there
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        fm_pre = read_frontmatter(brd_path)
+        slug = fm_pre.get("product_slug") or re.sub(r"_v\d+\.\d+$", "", brd_path.stem.replace("brd_", ""))
+        vault_cfg.initiative = fm_pre.get("initiative", "")
+        try:
+            brd_path = Path(resolve_artifact_path("brd", slug, vault_cfg, str(brd_path)))
+        except FileNotFoundError:
+            pass
 
     current_version = read_current_version(brd_path)
     next_version = bump_version(current_version)

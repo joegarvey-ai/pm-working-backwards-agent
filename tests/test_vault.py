@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from unittest.mock import patch
+
 from pm_agent_system.vault import (
     VaultConfig,
     build_frontmatter,
@@ -19,6 +21,8 @@ from pm_agent_system.vault import (
     inject_frontmatter,
     inject_traceability_section,
     mark_superseded,
+    resolve_artifact_path,
+    strip_frontmatter,
     write_to_vault,
 )
 
@@ -356,3 +360,107 @@ def test_initiative_nesting(tmp_path):
 
     nested = tmp_path / "PM Agent" / "commerce-platform" / "checkout" / "prfaq_v1.0.md"
     assert nested.exists()
+
+
+# ---------- strip_frontmatter ----------
+
+
+def test_strip_frontmatter_with_frontmatter():
+    content = "---\ntitle: Test\nstatus: draft\n---\n# Hello\n\nBody text."
+    result = strip_frontmatter(content)
+    assert result == "# Hello\n\nBody text."
+    assert "---" not in result
+    assert "title:" not in result
+
+
+def test_strip_frontmatter_without_frontmatter():
+    content = "# Hello\n\nBody text."
+    result = strip_frontmatter(content)
+    assert result == content
+
+
+def test_strip_frontmatter_removes_traceability():
+    content = (
+        "---\ntitle: Test\n---\n"
+        "> **Artifact chain:** Research → **PRFAQ** → BRD\n\n"
+        "# Hello\n\nBody."
+    )
+    result = strip_frontmatter(content)
+    assert "Artifact chain" not in result
+    assert "# Hello\n\nBody." in result
+
+
+# ---------- resolve_artifact_path ----------
+
+
+def test_resolve_artifact_path_vault_unmodified(tmp_path):
+    """Vault copy exists, not diverged → returns vault path silently."""
+    cfg = VaultConfig(vault_path=str(tmp_path), folder_prefix="PM Agent")
+    write_to_vault("# PRFAQ\n\nContent.", "prfaq", "test", "1.0", cfg)
+
+    output_file = tmp_path / "output" / "prfaq.md"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("# PRFAQ\n\nOld content.", encoding="utf-8")
+
+    result = resolve_artifact_path("prfaq", "test", cfg, str(output_file))
+    # Should return the vault path (not the output path)
+    assert "PM Agent" in result
+    assert result.endswith("prfaq_v1.0.md")
+
+
+def test_resolve_artifact_path_vault_diverged_accept(tmp_path):
+    """Vault copy exists, diverged, user says 'y' → returns vault path."""
+    cfg = VaultConfig(vault_path=str(tmp_path), folder_prefix="PM Agent")
+    vault_path = write_to_vault("# PRFAQ\n\nContent.", "prfaq", "test", "1.0", cfg)
+
+    # Modify the vault copy body to trigger divergence
+    vp = Path(vault_path)
+    content = vp.read_text(encoding="utf-8")
+    vp.write_text(content.replace("Content.", "Edited by PM."), encoding="utf-8")
+
+    output_file = tmp_path / "output" / "prfaq.md"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("# PRFAQ\n\nContent.", encoding="utf-8")
+
+    with patch("builtins.input", return_value="y"):
+        result = resolve_artifact_path("prfaq", "test", cfg, str(output_file))
+    assert result == vault_path
+
+
+def test_resolve_artifact_path_vault_diverged_reject(tmp_path):
+    """Vault copy exists, diverged, user says 'n' → returns output path."""
+    cfg = VaultConfig(vault_path=str(tmp_path), folder_prefix="PM Agent")
+    vault_path = write_to_vault("# PRFAQ\n\nContent.", "prfaq", "test", "1.0", cfg)
+
+    # Modify the vault copy body
+    vp = Path(vault_path)
+    content = vp.read_text(encoding="utf-8")
+    vp.write_text(content.replace("Content.", "Edited by PM."), encoding="utf-8")
+
+    output_file = tmp_path / "output" / "prfaq.md"
+    output_file.parent.mkdir(parents=True)
+    output_file.write_text("# PRFAQ\n\nContent.", encoding="utf-8")
+
+    with patch("builtins.input", return_value="n"):
+        result = resolve_artifact_path("prfaq", "test", cfg, str(output_file))
+    assert result == str(output_file)
+
+
+def test_resolve_artifact_path_no_vault(tmp_path):
+    """Vault not configured → returns output path."""
+    output_file = tmp_path / "prfaq.md"
+    output_file.write_text("# PRFAQ", encoding="utf-8")
+
+    result = resolve_artifact_path("prfaq", "test", None, str(output_file))
+    assert result == str(output_file)
+
+
+def test_resolve_artifact_path_vault_missing_file(tmp_path):
+    """Vault configured but file not in vault → returns output path."""
+    cfg = VaultConfig(vault_path=str(tmp_path), folder_prefix="PM Agent")
+
+    output_file = tmp_path / "prfaq.md"
+    output_file.write_text("# PRFAQ", encoding="utf-8")
+
+    result = resolve_artifact_path("prfaq", "test", cfg, str(output_file))
+    assert result == str(output_file)
