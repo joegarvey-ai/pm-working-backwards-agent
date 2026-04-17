@@ -57,6 +57,13 @@ from pm_agent_system.utils import (
     render_prfaq_to_markdown,
     render_research_to_markdown,
 )
+from pm_agent_system.vault import (
+    generate_index_note,
+    get_product_slug,
+    get_vault_config,
+    write_revision_to_vault,
+    write_to_vault,
+)
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -404,6 +411,14 @@ def cmd_generate(args: argparse.Namespace) -> None:
     working_copy = save_prfaq(markdown, inputs["feature_summary"], initial_version)
     print(f"\nPRFAQ complete. Working copy saved to: {working_copy}")
 
+    # Vault integration
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        product_slug = get_product_slug(inputs)
+        write_to_vault(markdown, "prfaq", product_slug, initial_version, vault_cfg,
+                       upstream="research_brief", downstream="brd")
+        generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
+
     if publish_dir:
         try:
             published = publish_output(working_copy, publish_dir, inputs["feature_summary"])
@@ -471,6 +486,14 @@ def cmd_revise(args: argparse.Namespace) -> None:
     markdown = render_prfaq_to_markdown(prfaq, slug=label)
     working_copy = save_prfaq(markdown, label, output_version)
     print(f"\nRevision complete. Working copy saved to: {working_copy}")
+
+    # Vault integration — write revision as new version
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        product_slug = label.lower().replace("_", "-")
+        write_revision_to_vault(markdown, "prfaq", product_slug, vault_cfg,
+                                upstream="research_brief", downstream="brd")
+        generate_index_note(product_slug, vault_cfg)
 
 
 # ---------- Subcommand: full-pipeline (Agents 1 → 2 → 3) ----------
@@ -560,7 +583,8 @@ def _print_cost_summary(result, checkpoint, output_dir):
     save_checkpoint(output_dir, checkpoint)
 
 
-def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint):
+def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint,
+                                    vault_config=None, product_slug=None):
     """Inspect a single task output, save its artifact to disk, and update the checkpoint.
 
     Returns the artifact name if one was saved, else None.
@@ -576,6 +600,9 @@ def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkp
         print(f"Research brief saved to: {path}")
         record_artifact(checkpoint, "research_brief", str(path))
         save_checkpoint(output_dir, checkpoint)
+        if vault_config and product_slug:
+            write_to_vault(md, "research_brief", product_slug, "1.0", vault_config,
+                           downstream="prfaq")
         return "research_brief"
 
     if isinstance(obj, PRFAQOutput):
@@ -585,6 +612,9 @@ def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkp
         print(f"PRFAQ saved to: {path}")
         record_artifact(checkpoint, "prfaq", str(path))
         save_checkpoint(output_dir, checkpoint)
+        if vault_config and product_slug:
+            write_to_vault(md, "prfaq", product_slug, version, vault_config,
+                           upstream="research_brief", downstream="brd")
         return "prfaq"
 
     if isinstance(obj, BRDOutput):
@@ -595,6 +625,9 @@ def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkp
         save_brd_exports(obj, label)
         record_artifact(checkpoint, "brd", str(path))
         save_checkpoint(output_dir, checkpoint)
+        if vault_config and product_slug:
+            write_to_vault(md, "brd", product_slug, version, vault_config,
+                           upstream="prfaq", downstream="build_spec")
         return "brd"
 
     return None
@@ -657,6 +690,10 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         checkpoint = new_checkpoint(input_hash, _MODEL)
         save_checkpoint(output_dir, checkpoint)
 
+    # Vault integration setup
+    vault_cfg = get_vault_config()
+    product_slug = get_product_slug(inputs) if vault_cfg else ""
+
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
     crew_inputs.update({
         "prfaq_path": "",
@@ -695,6 +732,9 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     save_brd_exports(to.pydantic, label)
                     record_artifact(checkpoint, "brd", str(brd_path))
                     save_checkpoint(output_dir, checkpoint)
+                    if vault_cfg and product_slug:
+                        write_to_vault(brd_md, "brd", product_slug, brd_version, vault_cfg,
+                                       upstream="prfaq", downstream="build_spec")
                     break
 
         spec = extract_pydantic_output(result, CodingPromptOutput)
@@ -711,7 +751,8 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         print("Human review checkpoints will pause after each agent.\n")
 
         def _task_callback(task_output):
-            _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint)
+            _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint,
+                                            vault_config=vault_cfg, product_slug=product_slug)
 
         try:
             crew = PmAgentSystem().full_pipeline_crew(skip_validation=skip)
@@ -732,6 +773,12 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
     print(f"Build spec reference saved to: {ref_path}")
     print(f"Tool-ready formatted spec saved to: {spec_path}")
+
+    # Vault: write build spec and update dashboard
+    if vault_cfg and product_slug:
+        write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
+                       upstream="brd")
+        generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     # Print cost summary
     _print_cost_summary(result, checkpoint, output_dir)
@@ -809,6 +856,9 @@ def cmd_brd(args: argparse.Namespace) -> None:
 
     label = inputs["feature_summary"]
     slug = _slugify(label)
+    vault_cfg = get_vault_config()
+    product_slug = get_product_slug(inputs) if vault_cfg else ""
+
     if hasattr(result, "tasks_output"):
         for task_output in result.tasks_output:
             if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
@@ -820,6 +870,9 @@ def cmd_brd(args: argparse.Namespace) -> None:
                 brd_path = save_brd(brd_md, label, brd_version)
                 print(f"BRD saved to: {brd_path}")
                 save_brd_exports(task_output.pydantic, label)
+                if vault_cfg and product_slug:
+                    write_to_vault(brd_md, "brd", product_slug, brd_version, vault_cfg,
+                                   upstream="prfaq", downstream="build_spec")
 
     spec = extract_pydantic_output(result, CodingPromptOutput)
     if spec is None:
@@ -829,6 +882,11 @@ def cmd_brd(args: argparse.Namespace) -> None:
     ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
     print(f"Build spec reference: {ref_path}")
     print(f"Formatted spec:       {spec_path}")
+
+    if vault_cfg and product_slug:
+        write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
+                       upstream="brd")
+        generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if getattr(args, "open", False):
         html_candidates = sorted(_output_dir().glob("brd_*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -877,6 +935,14 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
     ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
     print(f"Build spec reference: {ref_path}")
     print(f"Formatted spec:       {spec_path}")
+
+    # Vault integration
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+        write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
+                       upstream="brd")
+        generate_index_note(product_slug, vault_cfg)
 
 
 # ---------- Subcommand: revise-brd (Agent 3 Mode 2) ----------
@@ -929,6 +995,14 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
     working_copy = save_brd(markdown, label, output_version)
     print(f"\nRevision complete. Working copy saved to: {working_copy}")
     save_brd_exports(brd, label)
+
+    # Vault integration — write revision as new version
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+        write_revision_to_vault(markdown, "brd", product_slug, vault_cfg,
+                                upstream="prfaq", downstream="build_spec")
+        generate_index_note(product_slug, vault_cfg)
 
 
 # ---------- Subcommand: diff ----------
