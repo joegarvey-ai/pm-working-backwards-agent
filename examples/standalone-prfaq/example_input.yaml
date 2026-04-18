@@ -38,3 +38,12 @@ business_context: >
   of 2,300 stale tickets. Teams report spending 3.2 hours/week on status
   update meetings that could be replaced by async task updates. Support
   ticket volume related to "where is my task?" queries: 120/month.
+
+# Optional: Short product name for Obsidian vault folder names.
+# If omitted, the slug is derived from feature_summary (which can be long).
+product_name: "TaskFlow"
+
+# Optional: Group products by initiative in the Obsidian vault.
+# Creates a nesting level: PM Agent/{initiative}/{product}/
+# If omitted, products sit directly under PM Agent/{product}/.
+initiative: "Productivity Suite"
