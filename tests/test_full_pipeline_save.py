@@ -132,12 +132,15 @@ def _build_mock_result():
 
 
 @pytest.fixture
-def output_dir(tmp_path):
-    """Patch OUTPUT_DIR to a temporary directory."""
+def output_dir(tmp_path, monkeypatch):
+    """Patch OUTPUT_DIR to a temporary directory and isolate the vault env var."""
     out = tmp_path / "output"
     out.mkdir()
-    with patch.dict("os.environ", {"OUTPUT_DIR": str(out)}):
-        yield out
+    monkeypatch.setenv("OUTPUT_DIR", str(out))
+    # Prevent the test from touching the developer's real Obsidian vault via
+    # OBSIDIAN_VAULT_PATH from the ambient environment or a .env file.
+    monkeypatch.delenv("OBSIDIAN_VAULT_PATH", raising=False)
+    yield out
 
 
 @pytest.fixture

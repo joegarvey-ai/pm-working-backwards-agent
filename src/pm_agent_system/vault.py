@@ -533,6 +533,37 @@ def get_next_version(
     return f"{major}.{minor + 1}"
 
 
+def approve_vault_artifact(vault_file_path: str) -> None:
+    """Flip a vault file's status to ``approved`` and refresh ``original_hash``.
+
+    Called after the PM approves a draft at a checkpoint. The current body
+    content becomes the new baseline for future divergence detection
+    (so a subsequent PM edit is detected correctly).
+
+    Never raises — logs a warning on failure.
+    """
+    vp = Path(vault_file_path)
+    if not vp.exists():
+        return
+
+    try:
+        content = vp.read_text(encoding="utf-8")
+        fm_match = _FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return
+
+        fm_text = content.split("---\n")[1] if "---" in content else ""
+        fm_data = yaml.safe_load(fm_text) or {}
+        fm_data["status"] = "approved"
+        fm_data["original_hash"] = compute_body_hash(content)
+
+        new_fm = yaml.dump(fm_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        body_after_fm = content[fm_match.end():]
+        vp.write_text(f"---\n{new_fm}---\n{body_after_fm}", encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Failed to mark %s approved: %s", vault_file_path, exc)
+
+
 def mark_superseded(vault_file_path: str, superseded_by: str) -> None:
     """Mark a vault artifact as superseded by a newer version.
 

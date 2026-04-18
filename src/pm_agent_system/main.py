@@ -62,11 +62,19 @@ from pm_agent_system.vault import (
     get_initiative,
     get_product_slug,
     get_vault_config,
+    mark_superseded,
     resolve_artifact_path,
     strip_frontmatter,
     write_revision_to_vault,
     write_to_vault,
 )
+from pm_agent_system.vault_checkpoint import (
+    ArtifactHandler,
+    VaultCheckpointProvider,
+    WrittenArtifact,
+    build_registry,
+)
+from crewai.core.providers.human_input import reset_provider, set_provider
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -150,6 +158,45 @@ def validate_publish_destination(destination: str) -> Path | None:
         sys.exit(1)
 
     return path
+
+
+# ---------- Checkpoint provider helpers ----------
+
+# Maps Pydantic output classes to their artifact_type label, used by the few
+# post-kickoff hooks that need to know which artifact a TaskOutput corresponds to.
+_PYDANTIC_TO_ARTIFACT: dict[type, str] = {
+    ResearchOutput: "research_brief",
+    PRFAQOutput: "prfaq",
+    BRDOutput: "brd",
+    CodingPromptOutput: "build_spec",
+}
+
+
+def _install_checkpoint_provider(
+    handlers: list[ArtifactHandler],
+    vault_cfg,
+    product_slug: str,
+):
+    """Build and install the VaultCheckpointProvider. Returns (provider, token).
+
+    Callers must call ``reset_provider(token)`` (or rely on try/finally) when done.
+    """
+    provider = VaultCheckpointProvider(
+        registry=build_registry(handlers),
+        vault_config=vault_cfg,
+        product_slug=product_slug,
+    )
+    token = set_provider(provider)
+    return provider, token
+
+
+def _prfaq_version_from_output(obj) -> str:
+    """Resolve the version string from a PRFAQOutput's version_history."""
+    return obj.version_history[-1].version if obj.version_history else "1.0"
+
+
+def _brd_version_from_output(obj) -> str:
+    return obj.version_history[-1].version if obj.version_history else "1.0"
 
 
 # ---------- File output helpers ----------
@@ -358,12 +405,31 @@ def cmd_research(args: argparse.Namespace) -> None:
 
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
 
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="research_brief",
+                pydantic_class=ResearchOutput,
+                render_fn=render_research_to_markdown,
+                save_output_fn=lambda md, _obj: save_markdown_brief(md),
+                version="1.0",
+                downstream="prfaq",
+            ),
+        ],
+        vault_cfg=vault_cfg,
+        product_slug=product_slug,
+    )
+
     skip = getattr(args, "skip_validation", False)
     try:
-        result = PmAgentSystem().research_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
+        try:
+            result = PmAgentSystem().research_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
 
     research = extract_pydantic_output(result, ResearchOutput)
     if research is None:
@@ -371,15 +437,20 @@ def cmd_research(args: argparse.Namespace) -> None:
         print("Raw output:", result)
         sys.exit(1)
 
-    markdown = render_research_to_markdown(research)
-    working_copy = save_markdown_brief(markdown)
+    record = provider.artifacts.get("research_brief")
+    if record is None:
+        # Provider didn't fire (e.g. no human_input in this crew) — fall back to
+        # the old path so the command still produces an artifact.
+        markdown = render_research_to_markdown(research)
+        working_copy = save_markdown_brief(markdown)
+        if vault_cfg:
+            write_to_vault(markdown, "research_brief", product_slug, "1.0", vault_cfg,
+                           downstream="prfaq")
+    else:
+        working_copy = record.output_path
     print(f"\nResearch complete. Working copy saved to: {working_copy}")
 
-    # Vault integration
-    vault_cfg, product_slug = _vault_for_inputs(inputs)
     if vault_cfg:
-        write_to_vault(markdown, "research_brief", product_slug, "1.0", vault_cfg,
-                       downstream="prfaq")
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if publish_dir:
@@ -411,12 +482,42 @@ def cmd_generate(args: argparse.Namespace) -> None:
 
     crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
 
+    label = inputs["feature_summary"]
+    slug = _slugify(label)
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="research_brief",
+                pydantic_class=ResearchOutput,
+                render_fn=render_research_to_markdown,
+                save_output_fn=lambda md, _obj: save_markdown_brief(md),
+                version="1.0",
+                downstream="prfaq",
+            ),
+            ArtifactHandler(
+                artifact_type="prfaq",
+                pydantic_class=PRFAQOutput,
+                render_fn=lambda obj: render_prfaq_to_markdown(obj, slug=slug),
+                save_output_fn=lambda md, obj: save_prfaq(md, label, _prfaq_version_from_output(obj)),
+                version=_prfaq_version_from_output,
+                upstream="research_brief",
+                downstream="brd",
+            ),
+        ],
+        vault_cfg=vault_cfg,
+        product_slug=product_slug,
+    )
+
     skip = getattr(args, "skip_validation", False)
     try:
-        result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
+        try:
+            result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
 
     prfaq = extract_pydantic_output(result, PRFAQOutput)
     if prfaq is None:
@@ -424,22 +525,24 @@ def cmd_generate(args: argparse.Namespace) -> None:
         print("Raw output:", result)
         sys.exit(1)
 
-    initial_version = prfaq.version_history[-1].version if prfaq.version_history else "1.0"
-    slug = _slugify(inputs["feature_summary"])
-    markdown = render_prfaq_to_markdown(prfaq, slug=slug)
-    working_copy = save_prfaq(markdown, inputs["feature_summary"], initial_version)
+    record = provider.artifacts.get("prfaq")
+    if record is None:
+        initial_version = _prfaq_version_from_output(prfaq)
+        markdown = render_prfaq_to_markdown(prfaq, slug=slug)
+        working_copy = save_prfaq(markdown, label, initial_version)
+        if vault_cfg:
+            write_to_vault(markdown, "prfaq", product_slug, initial_version, vault_cfg,
+                           upstream="research_brief", downstream="brd")
+    else:
+        working_copy = record.output_path
     print(f"\nPRFAQ complete. Working copy saved to: {working_copy}")
 
-    # Vault integration
-    vault_cfg, product_slug = _vault_for_inputs(inputs)
     if vault_cfg:
-        write_to_vault(markdown, "prfaq", product_slug, initial_version, vault_cfg,
-                       upstream="research_brief", downstream="brd")
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if publish_dir:
         try:
-            published = publish_output(working_copy, publish_dir, inputs["feature_summary"])
+            published = publish_output(working_copy, publish_dir, label)
             print(f"Published approved PRFAQ to: {published}")
         except Exception as e:
             print(f"Warning: Failed to publish to {publish_dir}: {e}")
@@ -496,11 +599,51 @@ def cmd_revise(args: argparse.Namespace) -> None:
     print(f"\nRevising {prfaq_path.name} (v{current_version} → v{next_version})")
     print("The agent will pause to confirm which sections to revise.\n")
 
+    # Reuse the original slug from frontmatter when available so revisions stay grouped.
+    fm = read_frontmatter(prfaq_path)
+    label = fm.get("slug") or re.sub(r"_v\d+\.\d+$", "", prfaq_path.stem.replace("prfaq_", ""))
+    product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+    if vault_cfg:
+        vault_cfg.initiative = fm.get("initiative", "")
+
+    # post_approve: mark the old (pre-revision) vault file as superseded
+    old_vault_file = ""
+    if vault_cfg:
+        candidate = Path(str(prfaq_path))
+        if candidate.exists() and candidate.is_file() and "PM Agent" in str(candidate):
+            old_vault_file = str(candidate)
+
+    def _on_approve_prfaq(new_vault_path: str) -> None:
+        if old_vault_file and old_vault_file != new_vault_path and Path(old_vault_file).exists():
+            mark_superseded(old_vault_file, Path(new_vault_path).stem)
+
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="prfaq",
+                pydantic_class=PRFAQOutput,
+                render_fn=lambda obj: render_prfaq_to_markdown(obj, slug=label),
+                save_output_fn=lambda md, obj: save_prfaq(
+                    md, label, obj.version_history[-1].version if obj.version_history else next_version,
+                ),
+                version=lambda obj: obj.version_history[-1].version if obj.version_history else next_version,
+                upstream="research_brief",
+                downstream="brd",
+                post_approve=_on_approve_prfaq,
+            ),
+        ],
+        vault_cfg=vault_cfg,
+        product_slug=product_slug,
+    )
+
     try:
-        result = PmAgentSystem().revise_prfaq_crew().kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
+        try:
+            result = PmAgentSystem().revise_prfaq_crew().kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
 
     prfaq = extract_pydantic_output(result, PRFAQOutput)
     if prfaq is None:
@@ -508,22 +651,20 @@ def cmd_revise(args: argparse.Namespace) -> None:
         print("Raw output:", result)
         sys.exit(1)
 
-    output_version = prfaq.version_history[-1].version if prfaq.version_history else next_version
-
-    # Reuse the original slug from frontmatter when available so revisions stay grouped.
-    fm = read_frontmatter(prfaq_path)
-    label = fm.get("slug") or re.sub(r"_v\d+\.\d+$", "", prfaq_path.stem.replace("prfaq_", ""))
-    markdown = render_prfaq_to_markdown(prfaq, slug=label)
-    working_copy = save_prfaq(markdown, label, output_version)
+    record = provider.artifacts.get("prfaq")
+    if record is None:
+        # Provider didn't fire — fall back to legacy path so revision is still written
+        output_version = prfaq.version_history[-1].version if prfaq.version_history else next_version
+        markdown = render_prfaq_to_markdown(prfaq, slug=label)
+        working_copy = save_prfaq(markdown, label, output_version)
+        if vault_cfg:
+            write_revision_to_vault(markdown, "prfaq", product_slug, vault_cfg,
+                                    upstream="research_brief", downstream="brd")
+    else:
+        working_copy = record.output_path
     print(f"\nRevision complete. Working copy saved to: {working_copy}")
 
-    # Vault integration — write revision as new version
-    vault_cfg = get_vault_config()
     if vault_cfg:
-        product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
-        vault_cfg.initiative = fm.get("initiative", "")
-        write_revision_to_vault(markdown, "prfaq", product_slug, vault_cfg,
-                                upstream="research_brief", downstream="brd")
         generate_index_note(product_slug, vault_cfg)
 
 
@@ -614,54 +755,79 @@ def _print_cost_summary(result, checkpoint, output_dir):
     save_checkpoint(output_dir, checkpoint)
 
 
-def _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint,
-                                    vault_config=None, product_slug=None):
-    """Inspect a single task output, save its artifact to disk, and update the checkpoint.
+def _record_artifact_from_task_output(
+    task_output,
+    label,
+    slug,
+    output_dir,
+    checkpoint,
+    provider,
+    vault_config=None,
+    product_slug=None,
+):
+    """Update the resume checkpoint from a TaskOutput.
 
-    Returns the artifact name if one was saved, else None.
+    Normal flow: the VaultCheckpointProvider has already written the artifact to
+    output/ and the vault (handle_feedback fires BEFORE task_callback). In that
+    case we just record the path that the provider wrote.
+
+    Fallback flow: if the provider has no record for this artifact type (e.g. the
+    crew ran without human_input, or a test mocked kickoff past the provider), we
+    write the artifact here so the pipeline still produces files. This keeps the
+    callback safe as a last-resort writer.
+
+    Also handles BRD Jira/Linear exports which the provider does not produce.
     """
     if not hasattr(task_output, "pydantic") or task_output.pydantic is None:
         return None
 
     obj = task_output.pydantic
+    artifact_type = _PYDANTIC_TO_ARTIFACT.get(type(obj))
+    if artifact_type is None:
+        return None
 
-    if isinstance(obj, ResearchOutput):
-        md = render_research_to_markdown(obj)
-        path = save_markdown_brief(md)
-        print(f"Research brief saved to: {path}")
-        record_artifact(checkpoint, "research_brief", str(path))
-        save_checkpoint(output_dir, checkpoint)
-        if vault_config and product_slug:
-            write_to_vault(md, "research_brief", product_slug, "1.0", vault_config,
-                           downstream="prfaq")
-        return "research_brief"
+    record = provider.artifacts.get(artifact_type) if provider else None
 
-    if isinstance(obj, PRFAQOutput):
-        version = obj.version_history[-1].version if obj.version_history else "1.0"
-        md = render_prfaq_to_markdown(obj, slug=slug)
-        path = save_prfaq(md, label, version)
-        print(f"PRFAQ saved to: {path}")
-        record_artifact(checkpoint, "prfaq", str(path))
+    if record is None:
+        # Provider didn't fire — fallback write so the pipeline still produces files.
+        if isinstance(obj, ResearchOutput):
+            md = render_research_to_markdown(obj)
+            path = save_markdown_brief(md)
+            if vault_config and product_slug:
+                write_to_vault(md, "research_brief", product_slug, "1.0", vault_config,
+                               downstream="prfaq")
+        elif isinstance(obj, PRFAQOutput):
+            version = _prfaq_version_from_output(obj)
+            md = render_prfaq_to_markdown(obj, slug=slug)
+            path = save_prfaq(md, label, version)
+            if vault_config and product_slug:
+                write_to_vault(md, "prfaq", product_slug, version, vault_config,
+                               upstream="research_brief", downstream="brd")
+        elif isinstance(obj, BRDOutput):
+            version = _brd_version_from_output(obj)
+            md = render_brd_to_markdown(obj, slug=slug)
+            path = save_brd(md, label, version)
+            save_brd_exports(obj, label)
+            if vault_config and product_slug:
+                write_to_vault(md, "brd", product_slug, version, vault_config,
+                               upstream="prfaq", downstream="build_spec")
+        else:
+            return None
+        record_artifact(checkpoint, artifact_type, str(path))
         save_checkpoint(output_dir, checkpoint)
-        if vault_config and product_slug:
-            write_to_vault(md, "prfaq", product_slug, version, vault_config,
-                           upstream="research_brief", downstream="brd")
-        return "prfaq"
+        return artifact_type
+
+    # Provider already wrote — record path, add exports where relevant.
+    record_artifact(checkpoint, artifact_type, str(record.output_path))
+    save_checkpoint(output_dir, checkpoint)
 
     if isinstance(obj, BRDOutput):
-        version = obj.version_history[-1].version if obj.version_history else "1.0"
-        md = render_brd_to_markdown(obj, slug=slug)
-        path = save_brd(md, label, version)
-        print(f"BRD saved to: {path}")
-        save_brd_exports(obj, label)
-        record_artifact(checkpoint, "brd", str(path))
-        save_checkpoint(output_dir, checkpoint)
-        if vault_config and product_slug:
-            write_to_vault(md, "brd", product_slug, version, vault_config,
-                           upstream="prfaq", downstream="build_spec")
-        return "brd"
+        try:
+            save_brd_exports(obj, label)
+        except Exception as exc:
+            logger.warning("Failed to save BRD exports: %s", exc)
 
-    return None
+    return artifact_type
 
 
 def cmd_full_pipeline(args: argparse.Namespace) -> None:
@@ -734,90 +900,139 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     })
     skip = getattr(args, "skip_validation", False)
 
+    # Build the full registry — only the handlers for tasks that will actually run
+    # are needed, but registering all four is harmless (unused classes never match).
+    handlers = [
+        ArtifactHandler(
+            artifact_type="research_brief",
+            pydantic_class=ResearchOutput,
+            render_fn=render_research_to_markdown,
+            save_output_fn=lambda md, _obj: save_markdown_brief(md),
+            version="1.0",
+            downstream="prfaq",
+        ),
+        ArtifactHandler(
+            artifact_type="prfaq",
+            pydantic_class=PRFAQOutput,
+            render_fn=lambda obj: render_prfaq_to_markdown(obj, slug=slug),
+            save_output_fn=lambda md, obj: save_prfaq(
+                md, label, obj.version_history[-1].version if obj.version_history else "1.0"
+            ),
+            version=_prfaq_version_from_output,
+            upstream="research_brief",
+            downstream="brd",
+        ),
+        ArtifactHandler(
+            artifact_type="brd",
+            pydantic_class=BRDOutput,
+            render_fn=lambda obj: render_brd_to_markdown(obj, slug=slug),
+            save_output_fn=lambda md, obj: save_brd(
+                md, label, obj.version_history[-1].version if obj.version_history else "1.0"
+            ),
+            version=_brd_version_from_output,
+            upstream="prfaq",
+            downstream="build_spec",
+        ),
+        ArtifactHandler(
+            artifact_type="build_spec",
+            pydantic_class=CodingPromptOutput,
+            render_fn=lambda obj: render_build_spec_to_markdown(obj, slug=slug),
+            save_output_fn=lambda md, obj: save_build_spec(md, obj.formatted_spec, label, target_tool),
+            version="1.0",
+            upstream="brd",
+        ),
+    ]
+    provider, token = _install_checkpoint_provider(
+        handlers=handlers, vault_cfg=vault_cfg, product_slug=product_slug,
+    )
+
     # --- Resume path: only Agent 3 (BRD + build spec) ---
-    if not need_research and not need_prfaq and need_brd:
-        print(f"\nResuming Agent 3 (BRD + build spec) for: {label[:80]}...")
+    try:
+        if not need_research and not need_prfaq and need_brd:
+            print(f"\nResuming Agent 3 (BRD + build spec) for: {label[:80]}...")
 
-        # Find the PRFAQ and research paths from the checkpoint
-        existing_ckpt = load_checkpoint(output_dir) or {}
-        prfaq_file = existing_ckpt.get("artifacts", {}).get("prfaq", {}).get("path", "")
-        research_file = existing_ckpt.get("artifacts", {}).get("research_brief", {}).get("path", "")
-        # Vault read resolution: prefer vault copies if PM edited them
-        if vault_cfg and product_slug:
+            # Find the PRFAQ and research paths from the checkpoint
+            existing_ckpt = load_checkpoint(output_dir) or {}
+            prfaq_file = existing_ckpt.get("artifacts", {}).get("prfaq", {}).get("path", "")
+            research_file = existing_ckpt.get("artifacts", {}).get("research_brief", {}).get("path", "")
+            # Vault read resolution: prefer vault copies if PM edited them
+            if vault_cfg and product_slug:
+                try:
+                    prfaq_file = resolve_artifact_path("prfaq", product_slug, vault_cfg, prfaq_file)
+                except FileNotFoundError:
+                    pass
+                try:
+                    research_file = resolve_artifact_path("research_brief", product_slug, vault_cfg, research_file)
+                except FileNotFoundError:
+                    pass
+            crew_inputs["prfaq_path"] = prfaq_file
+            crew_inputs["research_path"] = research_file
+
+            def _resume_task_callback(task_output):
+                _record_artifact_from_task_output(
+                    task_output, label, slug, output_dir, checkpoint, provider,
+                    vault_config=vault_cfg, product_slug=product_slug,
+                )
+
             try:
-                prfaq_file = resolve_artifact_path("prfaq", product_slug, vault_cfg, prfaq_file)
-            except FileNotFoundError:
-                pass
+                crew = PmAgentSystem().brd_from_prfaq_crew()
+                crew.task_callback = _resume_task_callback
+                result = crew.kickoff(inputs=crew_inputs)
+            except Exception as e:
+                print(f"\nError running Agent 3: {e}")
+                sys.exit(1)
+
+            spec = extract_pydantic_output(result, CodingPromptOutput)
+            if spec is None:
+                print("\nError: Agent 3 did not return a valid CodingPromptOutput.")
+                sys.exit(1)
+
+        else:
+            # --- Full run (or partial resume that needs Agent 1+2) ---
+            print(f"\nFull pipeline starting for: {label[:80]}...")
+            if requirements_path_arg:
+                print(f"Customer requirements: {Path(requirements_path_arg).name}")
+            print(f"Target tool for build spec: {target_tool}")
+            print("Human review checkpoints will pause after each agent.\n")
+
+            def _task_callback(task_output):
+                _record_artifact_from_task_output(
+                    task_output, label, slug, output_dir, checkpoint, provider,
+                    vault_config=vault_cfg, product_slug=product_slug,
+                )
+
             try:
-                research_file = resolve_artifact_path("research_brief", product_slug, vault_cfg, research_file)
-            except FileNotFoundError:
-                pass
-        crew_inputs["prfaq_path"] = prfaq_file
-        crew_inputs["research_path"] = research_file
+                crew = PmAgentSystem().full_pipeline_crew(skip_validation=skip)
+                crew.task_callback = _task_callback
+                result = crew.kickoff(inputs=crew_inputs)
+            except Exception as e:
+                print(f"\nError running crew: {e}")
+                sys.exit(1)
 
-        try:
-            result = PmAgentSystem().brd_from_prfaq_crew().kickoff(inputs=crew_inputs)
-        except Exception as e:
-            print(f"\nError running Agent 3: {e}")
-            sys.exit(1)
+            spec = extract_pydantic_output(result, CodingPromptOutput)
+            if spec is None:
+                print("\nError: pipeline did not return a valid CodingPromptOutput object.")
+                print("Raw output:", result)
+                sys.exit(1)
+    finally:
+        reset_provider(token)
 
-        # Save BRD from tasks_output
-        if hasattr(result, "tasks_output"):
-            for to in result.tasks_output:
-                if hasattr(to, "pydantic") and isinstance(to.pydantic, BRDOutput):
-                    brd_version = to.pydantic.version_history[-1].version if to.pydantic.version_history else "1.0"
-                    brd_md = render_brd_to_markdown(to.pydantic, slug=slug)
-                    brd_path = save_brd(brd_md, label, brd_version)
-                    print(f"BRD saved to: {brd_path}")
-                    save_brd_exports(to.pydantic, label)
-                    record_artifact(checkpoint, "brd", str(brd_path))
-                    save_checkpoint(output_dir, checkpoint)
-                    if vault_cfg and product_slug:
-                        write_to_vault(brd_md, "brd", product_slug, brd_version, vault_cfg,
-                                       upstream="prfaq", downstream="build_spec")
-                    break
-
-        spec = extract_pydantic_output(result, CodingPromptOutput)
-        if spec is None:
-            print("\nError: Agent 3 did not return a valid CodingPromptOutput.")
-            sys.exit(1)
-
+    # Build spec paths — provider already wrote both reference + formatted files
+    bs_record = provider.artifacts.get("build_spec")
+    if bs_record is not None:
+        ref_path = bs_record.output_path
+        spec_path = bs_record.extras[0] if bs_record.extras else ref_path
     else:
-        # --- Full run (or partial resume that needs Agent 1+2) ---
-        print(f"\nFull pipeline starting for: {label[:80]}...")
-        if requirements_path_arg:
-            print(f"Customer requirements: {Path(requirements_path_arg).name}")
-        print(f"Target tool for build spec: {target_tool}")
-        print("Human review checkpoints will pause after each agent.\n")
-
-        def _task_callback(task_output):
-            _save_artifact_from_task_output(task_output, label, slug, output_dir, checkpoint,
-                                            vault_config=vault_cfg, product_slug=product_slug)
-
-        try:
-            crew = PmAgentSystem().full_pipeline_crew(skip_validation=skip)
-            crew.task_callback = _task_callback
-            result = crew.kickoff(inputs=crew_inputs)
-        except Exception as e:
-            print(f"\nError running crew: {e}")
-            sys.exit(1)
-
-        spec = extract_pydantic_output(result, CodingPromptOutput)
-        if spec is None:
-            print("\nError: pipeline did not return a valid CodingPromptOutput object.")
-            print("Raw output:", result)
-            sys.exit(1)
-
-    # Save build spec (always the final output)
-    reference_md = render_build_spec_to_markdown(spec, slug=slug)
-    ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
+        # Fallback (e.g. human_input disabled): do what the old code did
+        reference_md = render_build_spec_to_markdown(spec, slug=slug)
+        ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
+        if vault_cfg and product_slug:
+            write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
+                           upstream="brd")
     print(f"Build spec reference saved to: {ref_path}")
     print(f"Tool-ready formatted spec saved to: {spec_path}")
 
-    # Vault: write build spec and update dashboard
     if vault_cfg and product_slug:
-        write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
-                       upstream="brd")
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     # Print cost summary
@@ -896,43 +1111,96 @@ def cmd_brd(args: argparse.Namespace) -> None:
         print(f"Customer requirements: {Path(requirements_path_arg).name}")
     print(f"Target tool: {target_tool}\n")
 
-    try:
-        result = PmAgentSystem().brd_from_prfaq_crew().kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
-
     label = inputs["feature_summary"]
     slug = _slugify(label)
-    vault_cfg, product_slug = _vault_for_inputs(inputs)
 
-    if hasattr(result, "tasks_output"):
-        for task_output in result.tasks_output:
-            if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
-                brd_version = (
-                    task_output.pydantic.version_history[-1].version
-                    if task_output.pydantic.version_history else "1.0"
-                )
-                brd_md = render_brd_to_markdown(task_output.pydantic, slug=slug)
-                brd_path = save_brd(brd_md, label, brd_version)
-                print(f"BRD saved to: {brd_path}")
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="brd",
+                pydantic_class=BRDOutput,
+                render_fn=lambda obj: render_brd_to_markdown(obj, slug=slug),
+                save_output_fn=lambda md, obj: save_brd(
+                    md, label, obj.version_history[-1].version if obj.version_history else "1.0",
+                ),
+                version=_brd_version_from_output,
+                upstream="prfaq",
+                downstream="build_spec",
+            ),
+            ArtifactHandler(
+                artifact_type="build_spec",
+                pydantic_class=CodingPromptOutput,
+                render_fn=lambda obj: render_build_spec_to_markdown(obj, slug=slug),
+                save_output_fn=lambda md, obj: save_build_spec(md, obj.formatted_spec, label, target_tool),
+                version="1.0",
+                upstream="brd",
+            ),
+        ],
+        vault_cfg=vault_cfg,
+        product_slug=product_slug,
+    )
+
+    def _task_callback(task_output):
+        # BRD needs Jira/Linear exports alongside the provider's disk writes
+        if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
+            try:
                 save_brd_exports(task_output.pydantic, label)
-                if vault_cfg and product_slug:
-                    write_to_vault(brd_md, "brd", product_slug, brd_version, vault_cfg,
-                                   upstream="prfaq", downstream="build_spec")
+            except Exception as exc:
+                logger.warning("Failed to save BRD exports: %s", exc)
 
+    try:
+        try:
+            crew = PmAgentSystem().brd_from_prfaq_crew()
+            crew.task_callback = _task_callback
+            result = crew.kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
+
+    # Confirm the final typed output was produced
     spec = extract_pydantic_output(result, CodingPromptOutput)
     if spec is None:
         print("\nError: did not return a valid CodingPromptOutput.")
         sys.exit(1)
-    reference_md = render_build_spec_to_markdown(spec, slug=slug)
-    ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
+
+    # Report BRD path from provider (or fallback)
+    brd_record = provider.artifacts.get("brd")
+    if brd_record is not None:
+        print(f"BRD saved to: {brd_record.output_path}")
+    else:
+        # Fallback: provider didn't fire — do the old write
+        if hasattr(result, "tasks_output"):
+            for task_output in result.tasks_output:
+                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
+                    brd_version = (
+                        task_output.pydantic.version_history[-1].version
+                        if task_output.pydantic.version_history else "1.0"
+                    )
+                    brd_md = render_brd_to_markdown(task_output.pydantic, slug=slug)
+                    brd_path = save_brd(brd_md, label, brd_version)
+                    print(f"BRD saved to: {brd_path}")
+                    save_brd_exports(task_output.pydantic, label)
+                    if vault_cfg and product_slug:
+                        write_to_vault(brd_md, "brd", product_slug, brd_version, vault_cfg,
+                                       upstream="prfaq", downstream="build_spec")
+
+    # Report build spec paths
+    bs_record = provider.artifacts.get("build_spec")
+    if bs_record is not None:
+        ref_path = bs_record.output_path
+        spec_path = bs_record.extras[0] if bs_record.extras else ref_path
+    else:
+        reference_md = render_build_spec_to_markdown(spec, slug=slug)
+        ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
+        if vault_cfg and product_slug:
+            write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
+                           upstream="brd")
     print(f"Build spec reference: {ref_path}")
     print(f"Formatted spec:       {spec_path}")
 
     if vault_cfg and product_slug:
-        write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
-                       upstream="brd")
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if getattr(args, "open", False):
@@ -976,31 +1244,57 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
 
     print(f"\nRegenerating build spec from {brd_path.name} for target tool: {target_tool}\n")
 
+    fm = read_frontmatter(brd_path)
+    label = fm.get("slug") or re.sub(r"_v\d+\.\d+$", "", brd_path.stem.replace("brd_", ""))
+    product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        vault_cfg.initiative = fm.get("initiative", "")
+
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="build_spec",
+                pydantic_class=CodingPromptOutput,
+                render_fn=lambda obj: render_build_spec_to_markdown(obj, slug=label),
+                save_output_fn=lambda md, obj: save_build_spec(md, obj.formatted_spec, label, target_tool),
+                version="1.0",
+                upstream="brd",
+            ),
+        ],
+        vault_cfg=vault_cfg,
+        product_slug=product_slug,
+    )
+
     try:
-        result = PmAgentSystem().regenerate_build_spec_crew().kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
+        try:
+            result = PmAgentSystem().regenerate_build_spec_crew().kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
 
     spec = extract_pydantic_output(result, CodingPromptOutput)
     if spec is None:
         print("\nError: did not return a valid CodingPromptOutput.")
         sys.exit(1)
 
-    fm = read_frontmatter(brd_path)
-    label = fm.get("slug") or re.sub(r"_v\d+\.\d+$", "", brd_path.stem.replace("brd_", ""))
-    reference_md = render_build_spec_to_markdown(spec, slug=label)
-    ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
+    bs_record = provider.artifacts.get("build_spec")
+    if bs_record is not None:
+        ref_path = bs_record.output_path
+        spec_path = bs_record.extras[0] if bs_record.extras else ref_path
+    else:
+        reference_md = render_build_spec_to_markdown(spec, slug=label)
+        ref_path, spec_path = save_build_spec(reference_md, spec.formatted_spec, label, target_tool)
+        if vault_cfg:
+            write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
+                           upstream="brd")
     print(f"Build spec reference: {ref_path}")
     print(f"Formatted spec:       {spec_path}")
 
-    # Vault integration
-    vault_cfg = get_vault_config()
     if vault_cfg:
-        product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
-        vault_cfg.initiative = fm.get("initiative", "")
-        write_to_vault(reference_md, "build_spec", product_slug, "1.0", vault_cfg,
-                       upstream="brd")
         generate_index_note(product_slug, vault_cfg)
 
 
@@ -1047,33 +1341,73 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
 
     print(f"\nRevising {brd_path.name} (v{current_version} → v{next_version})\n")
 
+    fm = read_frontmatter(brd_path)
+    label = fm.get("slug") or re.sub(r"_v\d+\.\d+$", "", brd_path.stem.replace("brd_", ""))
+    product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+
+    vault_cfg_for_provider = get_vault_config()
+    if vault_cfg_for_provider:
+        vault_cfg_for_provider.initiative = fm.get("initiative", "")
+
+    old_vault_file = ""
+    if vault_cfg_for_provider:
+        candidate = Path(str(brd_path))
+        if candidate.exists() and "PM Agent" in str(candidate):
+            old_vault_file = str(candidate)
+
+    def _on_approve_brd(new_vault_path: str) -> None:
+        if old_vault_file and old_vault_file != new_vault_path and Path(old_vault_file).exists():
+            mark_superseded(old_vault_file, Path(new_vault_path).stem)
+
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="brd",
+                pydantic_class=BRDOutput,
+                render_fn=lambda obj: render_brd_to_markdown(obj, slug=label),
+                save_output_fn=lambda md, obj: save_brd(
+                    md, label, obj.version_history[-1].version if obj.version_history else next_version,
+                ),
+                version=lambda obj: obj.version_history[-1].version if obj.version_history else next_version,
+                upstream="prfaq",
+                downstream="build_spec",
+                post_approve=_on_approve_brd,
+            ),
+        ],
+        vault_cfg=vault_cfg_for_provider,
+        product_slug=product_slug,
+    )
+
     try:
-        result = PmAgentSystem().revise_brd_crew().kickoff(inputs=crew_inputs)
-    except Exception as e:
-        print(f"\nError running crew: {e}")
-        sys.exit(1)
+        try:
+            result = PmAgentSystem().revise_brd_crew().kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
 
     brd = extract_pydantic_output(result, BRDOutput)
     if brd is None:
         print("\nError: Agent 3 did not return a valid BRDOutput.")
         sys.exit(1)
 
-    output_version = brd.version_history[-1].version if brd.version_history else next_version
-    fm = read_frontmatter(brd_path)
-    label = fm.get("slug") or re.sub(r"_v\d+\.\d+$", "", brd_path.stem.replace("brd_", ""))
-    markdown = render_brd_to_markdown(brd, slug=label)
-    working_copy = save_brd(markdown, label, output_version)
+    record = provider.artifacts.get("brd")
+    if record is None:
+        # Fallback (provider didn't fire)
+        output_version = brd.version_history[-1].version if brd.version_history else next_version
+        markdown = render_brd_to_markdown(brd, slug=label)
+        working_copy = save_brd(markdown, label, output_version)
+        if vault_cfg_for_provider:
+            write_revision_to_vault(markdown, "brd", product_slug, vault_cfg_for_provider,
+                                    upstream="prfaq", downstream="build_spec")
+    else:
+        working_copy = record.output_path
     print(f"\nRevision complete. Working copy saved to: {working_copy}")
     save_brd_exports(brd, label)
 
-    # Vault integration — write revision as new version
-    vault_cfg = get_vault_config()
-    if vault_cfg:
-        product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
-        vault_cfg.initiative = fm.get("initiative", "")
-        write_revision_to_vault(markdown, "brd", product_slug, vault_cfg,
-                                upstream="prfaq", downstream="build_spec")
-        generate_index_note(product_slug, vault_cfg)
+    if vault_cfg_for_provider:
+        generate_index_note(product_slug, vault_cfg_for_provider)
 
 
 # ---------- Subcommand: diff ----------
