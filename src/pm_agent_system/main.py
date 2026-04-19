@@ -103,15 +103,21 @@ def load_input(file_path: str) -> dict:
 
 
 def validate_input(inputs: dict) -> dict:
-    """Validate required fields and set defaults for encouraged/optional fields."""
-    missing = [f for f in REQUIRED_FIELDS if not inputs.get(f, "").strip()]
+    """Validate required fields and set defaults for encouraged/optional fields.
+
+    Tolerates ``None`` values in addition to missing keys: ``parse_markdown_input``
+    returns ``None`` for a section whose header exists but has no content, and
+    treating that the same as a missing field keeps the packaged example and
+    any PM-authored brief with blank optional sections working.
+    """
+    missing = [f for f in REQUIRED_FIELDS if not (inputs.get(f) or "").strip()]
     if missing:
         print(f"Error: Missing required fields: {', '.join(missing)}")
         print("Please fill in these fields in your input file before running.")
         sys.exit(1)
 
     for field in ENCOURAGED_FIELDS:
-        if not inputs.get(field, "").strip():
+        if not (inputs.get(field) or "").strip():
             print(f"Note: '{field}' is empty. The agent will proceed without it.")
             inputs[field] = "Not provided."
 
