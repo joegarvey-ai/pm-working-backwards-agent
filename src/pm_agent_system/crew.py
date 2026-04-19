@@ -1,7 +1,13 @@
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 
-from pm_agent_system.models import BRDOutput, CodingPromptOutput, PRFAQOutput, ResearchOutput
+from pm_agent_system.models import (
+    BRDOutput,
+    CodingPromptOutput,
+    DesignBriefOutput,
+    PRFAQOutput,
+    ResearchOutput,
+)
 from pm_agent_system.tools import (
     AWSDocsReadTool,
     AWSDocsSearchTool,
@@ -37,13 +43,13 @@ def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS) -> AnthropicCompletion:
 class PmAgentSystem:
     """PM Agent System crew.
 
-    Three agents are scaffolded:
+    Four agents are scaffolded:
       - Agent 1: Research Agent (research_task)
       - Agent 2: PRFAQ Agent (generate_prfaq, revise_prfaq)
-      - Agent 4: BRD + Build Spec Agent (generate_brd, revise_brd, generate_build_spec)
-
-    Agent 3 is reserved for the planned Design Brief + Wireframe agent
-    (not yet built).
+      - Agent 3: Design Brief + Wireframe Agent (generate_design_brief,
+        revise_design_brief). SVG wireframe generation is stubbed.
+      - Agent 4: BRD + Build Spec Agent (generate_brd, revise_brd,
+        generate_build_spec)
 
     Multiple crew builders compose subsets of agents/tasks for the
     different operating modes (research-only, full pipeline, BRD-only,
@@ -79,6 +85,19 @@ class PmAgentSystem:
             tools=[
                 FileReaderTool(),
                 StyleGuideLoaderTool(),
+                ObsidianSearchTool(),
+                ObsidianReadTool(),
+            ],
+            llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
+    @agent
+    def design_brief_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["design_brief_agent"],  # type: ignore[index]
+            tools=[
+                FileReaderTool(),
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
             ],
@@ -133,6 +152,20 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["revise_prfaq"],  # type: ignore[index]
             output_pydantic=PRFAQOutput,
+        )
+
+    @task
+    def generate_design_brief(self) -> Task:
+        return Task(
+            config=self.tasks_config["generate_design_brief"],  # type: ignore[index]
+            output_pydantic=DesignBriefOutput,
+        )
+
+    @task
+    def revise_design_brief(self) -> Task:
+        return Task(
+            config=self.tasks_config["revise_design_brief"],  # type: ignore[index]
+            output_pydantic=DesignBriefOutput,
         )
 
     @task
@@ -231,8 +264,32 @@ class PmAgentSystem:
             verbose=True,
         )
 
-    def full_pipeline_crew(self, skip_validation: bool = False) -> Crew:
-        """Agent 1 → Agent 2 → Agent 4 (research → PRFAQ → BRD → build spec)."""
+    def design_brief_crew(self) -> Crew:
+        """Agent 3 only — generate a design brief from an approved PRFAQ on disk."""
+        return Crew(
+            agents=[self.design_brief_agent()],
+            tasks=[self.generate_design_brief()],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def revise_design_brief_crew(self) -> Crew:
+        """Agent 3 only — revise an existing design brief."""
+        return Crew(
+            agents=[self.design_brief_agent()],
+            tasks=[self.revise_design_brief()],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def full_pipeline_crew(
+        self, skip_validation: bool = False, skip_design: bool = False
+    ) -> Crew:
+        """Agent 1 → Agent 2 → Agent 3 (optional) → Agent 4.
+
+        When ``skip_design`` is True, Agent 3 is omitted and the pipeline
+        matches the original three-agent behavior exactly.
+        """
         tasks = self._research_tasks(skip_validation)
         research = tasks[-1]
         prfaq_task = Task(
@@ -240,19 +297,39 @@ class PmAgentSystem:
             output_pydantic=PRFAQOutput,
             context=[research],
         )
+
+        design_task: Task | None = None
+        if not skip_design:
+            design_task = Task(
+                config=self.tasks_config["generate_design_brief"],  # type: ignore[index]
+                output_pydantic=DesignBriefOutput,
+                context=[research, prfaq_task],
+            )
+
+        brd_context = [research, prfaq_task]
+        if design_task is not None:
+            brd_context.append(design_task)
         brd_task = Task(
             config=self.tasks_config["generate_brd_chained"],  # type: ignore[index]
             output_pydantic=BRDOutput,
-            context=[research, prfaq_task],
+            context=brd_context,
         )
         spec_task = Task(
             config=self.tasks_config["generate_build_spec_chained"],  # type: ignore[index]
             output_pydantic=CodingPromptOutput,
             context=[brd_task],
         )
-        tasks.extend([prfaq_task, brd_task, spec_task])
+
+        tasks.append(prfaq_task)
+        agents_list = [self.research_agent(), self.prfaq_agent()]
+        if design_task is not None:
+            tasks.append(design_task)
+            agents_list.append(self.design_brief_agent())
+        tasks.extend([brd_task, spec_task])
+        agents_list.append(self.brd_agent())
+
         return Crew(
-            agents=[self.research_agent(), self.prfaq_agent(), self.brd_agent()],
+            agents=agents_list,
             tasks=tasks,
             process=Process.sequential,
             verbose=True,

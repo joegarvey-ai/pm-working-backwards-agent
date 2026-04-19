@@ -414,6 +414,180 @@ revise_prfaq:
   agent: prfaq_agent
   human_input: true
 
+generate_design_brief:
+  description: >
+    You have an approved PRFAQ and a research brief. Produce a
+    DesignBriefOutput that maps the product's customer experience to
+    concrete screens, user flows, and design decisions.
+
+    ## Inputs
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Target Users:** {user_summary}
+
+    **Known Constraints:** {known_constraints}
+
+    **Approved PRFAQ file path:** {prfaq_path}
+
+    **Research brief file path (may be empty if unavailable):** {research_path}
+
+    **Visual style guide path (may be empty):** {visual_style_guide_path}
+
+    ## Process
+
+    1. **Read the approved PRFAQ** from {prfaq_path} using the file_reader
+       tool. The customer experience narrative is your primary source for
+       screen inventory and user flows.
+
+    2. **If {research_path} is non-empty, read it** using file_reader. The
+       competitive landscape section is your source for competitive UI
+       patterns. Reference competitors by name.
+
+    3. **Style guide handling.**
+       - If {visual_style_guide_path} is non-empty, read that file using
+         the file_reader tool. Apply its colors, typography, spacing, and
+         component preferences throughout the brief. Reference specific
+         style guide sections in the Brand / Style Context output. Set
+         style_guide_used=True in the output.
+       - If {visual_style_guide_path} is empty OR the file cannot be
+         read, use sensible defaults (neutral palette, system fonts).
+         In the Brand / Style Context section, note that providing a
+         style guide would improve brand accuracy. Set
+         style_guide_used=False.
+
+    4. **Extract screen inventory.** Walk the customer experience
+       narrative paragraph by paragraph. Every named interaction, every
+       decision point, every system response becomes a candidate screen.
+       Produce at least 2 ScreenEntry items. For each screen:
+       - name: Proper noun (Dashboard, Event Detail, Onboarding Welcome)
+       - purpose: One sentence on why this screen exists
+       - primary_flow: Which user flow this screen primarily serves
+       - source_section: Specific PRFAQ section reference (e.g. "CX
+         narrative, onboarding paragraph 2"). No vague references.
+
+    5. **Define user flows.** Produce at least 1 DesignUserFlow. Typical
+       products have three: an onboarding flow, a core flow (the main
+       thing the product does), and one or more secondary flows. Each
+       flow has:
+       - name: e.g. "Core — Find and Track a Show"
+       - priority: "core" | "onboarding" | "secondary"
+       - steps: ordered DesignFlowStep list, each with step_number,
+         user_action, system_response, and screen. Every screen
+         referenced must exist in screen_inventory.
+       - related_screens: the screens this flow touches.
+
+    6. **Derive design principles.** Produce 3-5 principles specific to
+       THIS product. Each principle is one sentence that a designer could
+       use to break a tie when making a concrete design decision.
+       "Minimize clicks" is banned. "Support one-handed phone use
+       during a live event where the user may be standing" is correct.
+
+    7. **Write competitive UI patterns.** Reference each competitor named
+       in the research brief. For each, note a specific UI pattern worth
+       matching or specifically avoiding. Do not invent competitors.
+
+    8. **Brand / Style Context.** Describe the visual direction: palette,
+       typography, component preferences. If a style guide was loaded,
+       reference its sections. If not, describe sensible defaults and
+       flag that a style guide would sharpen this section.
+
+    9. **Accessibility.** If known_constraints or the style guide mention
+       WCAG, keyboard navigation, screen readers, or contrast
+       requirements, describe where those affect design decisions. If
+       nothing is specified, write a one-line default ("target WCAG AA
+       contrast; all interactive elements reachable via keyboard").
+
+    10. **Platform targets.** Extract from known_constraints. If the PM
+        said "web first, mobile later", platform_targets should be
+        ["web", "mobile"] with order reflecting priority. If no platform
+        constraint is stated, leave empty.
+
+    11. **Return as a JSON object matching DesignBriefOutput.**
+
+    ## Writing Rules (Hard Constraints)
+
+    - No hyperbole. Banned words: "delightful", "seamless", "intuitive",
+      "powerful", "best-in-class", "robust", "comprehensive".
+    - No em dashes. Restructure the sentence.
+    - Every screen name is a proper noun.
+    - Every flow step reads: user does X → system responds with Y on
+      screen Z.
+    - Every screen has a source_section. No vague references.
+    - Never invent competitors. Only reference competitors named in the
+      research brief.
+
+  expected_output: >
+    A DesignBriefOutput JSON object with all required fields populated.
+    screen_inventory >= 2 entries, each with a specific source_section.
+    user_flows >= 1, each with ordered steps referencing screens from
+    the inventory. design_principles >= 3 and <= 5, specific to this
+    product. competitive_ui_patterns references named competitors from
+    the research brief. brand_style_context reflects whether a style
+    guide was loaded. style_guide_used is set to True or False
+    consistent with whether a style guide was applied.
+
+  agent: design_brief_agent
+  human_input: true
+
+revise_design_brief:
+  description: >
+    You are revising an existing design brief based on PM feedback.
+    This task is independent of the PRFAQ and research tasks.
+
+    ## Inputs
+
+    **Current design brief file path:** {design_brief_path}
+
+    **Revision context (file path, may be empty):** {context_path}
+
+    **Revision context (inline text, may be empty):** {context_text}
+
+    ## Process
+
+    1. **Read the current design brief** from {design_brief_path} using
+       the file_reader tool. Parse the structure.
+
+    2. **Read revision context.** If {context_path} is set, use
+       file_reader to load it. If {context_text} is set, use it as-is.
+       Combine both if both are present.
+
+    3. **Pause and ask the PM** which sections need revision via the
+       human_input checkpoint. Valid sections: product_overview,
+       screen_inventory, user_flows, design_principles,
+       competitive_ui_patterns, brand_style_context,
+       accessibility_considerations, platform_targets.
+
+    4. **Update ONLY the sections the PM identified.** Preserve every
+       other section exactly as-is. Do not "improve" untouched sections.
+
+    5. **Preserve traceability.** If you revise screen_inventory, every
+       updated ScreenEntry still has a source_section. If you revise
+       user_flows, referenced screens still exist in the inventory.
+
+    6. **Return the full DesignBriefOutput JSON object** with all
+       sections — updated and preserved alike.
+
+  expected_output: >
+    A DesignBriefOutput JSON object containing the full revised design
+    brief. Only the PM-approved sections show new content; all other
+    sections match the input verbatim.
+
+  agent: design_brief_agent
+  human_input: true
+
+generate_wireframes:
+  description: >
+    Generate SVG wireframes from the approved design brief. [NOT YET
+    IMPLEMENTED — this task definition is a placeholder for a future
+    prompt engineering iteration focused on SVG output quality.]
+
+  expected_output: >
+    Placeholder. This task is not yet wired into any crew.
+
+  agent: design_brief_agent
+  human_input: true
+
 generate_brd_chained:
   description: >
     Produce a complete BRD v1.0 that an engineer can build from without
@@ -496,6 +670,20 @@ generate_brd_chained:
     7. **Enforce traceability.** Every functional requirement must
        reference at least one user story ID. Every user story must
        reference a research finding or PRFAQ section in its source field.
+
+    7a. **Design brief handling (conditional).** If {design_brief_path}
+       is non-empty, use file_reader to read the design brief. Then:
+       1. Reference specific screens by name when writing user stories
+          (e.g., "As a user on the Dashboard screen, I want to...").
+       2. Validate that your user stories cover every flow step listed
+          in the design brief's user flows — every flow step should map
+          to at least one user story.
+       3. Carry screen names into the BRD's functional requirement
+          descriptions for consistency with the design.
+       4. Reference design principles from the brief in your solution
+          rationale where relevant.
+       If {design_brief_path} is empty, proceed without design context
+       and do not reference screen names or flows.
 
     8. **Return as a JSON object matching the BRDOutput schema.**
 
@@ -771,6 +959,20 @@ generate_brd_standalone:
     8. **Enforce traceability.** Every functional requirement must
        reference at least one user story ID. Every user story must
        reference a research finding or PRFAQ section in its source field.
+
+    8a. **Design brief handling (conditional).** If {design_brief_path}
+       is non-empty, use file_reader to read the design brief. Then:
+       1. Reference specific screens by name when writing user stories
+          (e.g., "As a user on the Dashboard screen, I want to...").
+       2. Validate that your user stories cover every flow step listed
+          in the design brief's user flows — every flow step should map
+          to at least one user story.
+       3. Carry screen names into the BRD's functional requirement
+          descriptions for consistency with the design.
+       4. Reference design principles from the brief in your solution
+          rationale where relevant.
+       If {design_brief_path} is empty, proceed without design context
+       and do not reference screen names or flows.
 
     9. **Return as a JSON object matching the BRDOutput schema.**
 
