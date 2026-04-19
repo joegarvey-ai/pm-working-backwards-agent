@@ -1,6 +1,6 @@
 # Working Backwards Agent for Product Managers
 
-An open-source multi-agent AI system that guides product managers from a rough problem statement through stakeholder-ready research, a Working Backwards PRFAQ, a BRD, and an engineer-ready build spec. Built on [CrewAI](https://www.crewai.com/) and Claude.
+An open-source multi-agent AI system that guides product managers from a rough problem statement through stakeholder-ready research, a Working Backwards PRFAQ, a design brief with screen inventory and user flows, a BRD, and an engineer-ready build spec. Built on [CrewAI](https://www.crewai.com/) and Claude.
 
 This is for product managers, not engineers. If you can fill out a markdown template and copy-paste an API key, you can run it. See [SETUP.md](SETUP.md) for a step-by-step walkthrough that assumes you have never used a terminal.
 
@@ -12,13 +12,16 @@ flowchart LR
     B --> C[research_brief.md]
     C --> D[Agent 2<br/>PRFAQ]
     D --> E[prfaq_v1.0.md]
-    E --> F[Agent 4<br/>BRD + Build Spec]
+    E --> K[Agent 3<br/>Design Brief<br/>optional]
+    K --> L[design_brief_v1.0.md]
+    L --> F[Agent 4<br/>BRD + Build Spec]
+    E -. "--skip-design" .-> F
     F --> G[brd_v1.0.md]
     F --> I[build_spec.md]
     I --> J[Drop into<br/>Kiro / Claude Code / Cursor]
 ```
 
-> Three agents implemented today (Agents 1, 2, 4), four artifacts. Agent 4 produces two artifacts in sequence — the BRD first, then the build spec after you approve the BRD. In the code, these are two tasks within one agent, not two separate agents. Agent 3 is reserved for the planned Design Brief + Wireframe agent (not yet built).
+> Four agents, five artifacts. Agent 3 (Design Brief) synthesizes the PRFAQ and research into a screen inventory, user flows, and design principles. It's optional in the full pipeline — pass `--skip-design` to reproduce the three-agent behavior. Agent 4 produces two artifacts in sequence — the BRD first, then the build spec after you approve the BRD. In the code, Agent 4 is two tasks within one agent, not two separate agents. SVG wireframe generation is coming soon; today Agent 3 produces the design brief only.
 
 You write a short problem statement. The agents do the research, write the Working Backwards document, translate it into requirements, and produce a build spec your engineers (or coding agent) can run with. You stay in the loop at every handoff.
 
@@ -125,6 +128,9 @@ Input file paths below show `.md` as the primary example. YAML input files (`.ya
 | Update a BRD after engineering feedback | `uv run pm_agent_system revise-brd --brd-path brd_v1.0.md --context-text "FR-003 needs a GSI"` |
 | I have my own research and just need a PRFAQ | `uv run pm_agent_system generate input/my-product.md --research-path research.md` |
 | I have an approved PRFAQ and my own requirements | `uv run pm_agent_system brd input/my-product.md --prfaq-path prfaq.md --requirements-path requirements.csv` |
+| I want to visualize the product before writing requirements | `uv run pm_agent_system wireframes input/my-product.md --prfaq-path prfaq.md` |
+| Revise a design brief after a review | `uv run pm_agent_system revise-wireframes --design-brief-path design_brief_v1.0.md --context-text "screen inventory needs a settings page"` |
+| Run the full pipeline without the design brief | Add `--skip-design` to the `full-pipeline` command |
 | Skip the assumption-challenge step | Add `--skip-validation` to any research/generate/full-pipeline command |
 | Compare two document versions after a revision | `uv run pm_agent_system diff output/prfaq_v1.0.md output/prfaq_v1.1.md` |
 
@@ -138,7 +144,7 @@ Every artifact is written to `output/` in two formats: a `.md` file for editing 
 
 If you use [Obsidian](https://obsidian.md) for note-taking, artifacts can be
 written directly to your vault with frontmatter, version history, and
-wikilinks connecting the full artifact chain (research → PRFAQ → BRD → build spec).
+wikilinks connecting the full artifact chain (research → PRFAQ → design brief → BRD → build spec).
 
 To enable:
 
@@ -170,8 +176,10 @@ Input file arguments below accept either `.md` (recommended) or `.yaml`/`.yml`.
 | `research <input>` | Run Agent 1 only. Produces a research brief. |
 | `generate <input>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. |
 | `revise --prfaq-path <file>` | Run Agent 2 to revise an existing PRFAQ. Pass `--context-text` or `--context-path` for the revision notes. |
-| `full-pipeline <input>` | Run all three agents end to end. Produces research brief, PRFAQ, BRD, and build spec. |
-| `brd <input> --prfaq-path <file>` | Run Agent 4 to produce a BRD and build spec from an approved PRFAQ. |
+| `wireframes <input> --prfaq-path <file>` | Run Agent 3 only. Produces a design brief from an approved PRFAQ. Pass `--research-path` to ground competitive UI patterns. |
+| `revise-wireframes --design-brief-path <file>` | Revise an existing design brief. Pass `--context-text` or `--context-path` for the revision notes. |
+| `full-pipeline <input>` | Run all agents end to end. Produces research brief, PRFAQ, design brief, BRD, and build spec. Add `--skip-design` to run the three-agent pipeline without Agent 3. |
+| `brd <input> --prfaq-path <file>` | Run Agent 4 to produce a BRD and build spec from an approved PRFAQ. Pass `--design-brief-path` to have the BRD reference screen names and flows. |
 | `build-spec --brd-path <file>` | Regenerate just the build spec from an approved BRD. Useful when switching `--target-tool`. |
 | `revise-brd --brd-path <file>` | Revise an existing BRD. Pass `--context-text` or `--context-path` for the revision notes. |
 | `diff <old> <new>` | Compare two document versions section by section. Shows which sections were added, removed, or changed. Works best with agent-generated document pairs — manual header renames between versions appear as a deletion plus an addition rather than a single change. |
@@ -199,14 +207,14 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 
 ## Architecture
 
-Three agents implemented today, each with a single job, chained by a CrewAI orchestrator. Agent 4 produces two artifacts (BRD, then build spec) as two sequential tasks within one agent. Agent 3 is reserved for the planned Design Brief + Wireframe agent.
+Four agents, each with a single job, chained by a CrewAI orchestrator. Agent 4 produces two artifacts (BRD, then build spec) as two sequential tasks within one agent. Agent 3 is optional; pass `--skip-design` to run the pipeline without it.
 
 | Agent | Job | Tools |
 |---|---|---|
 | 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, competitive intelligence (G2/Capterra/TrustRadius), Dovetail (optional), Obsidian (optional), file readers |
 | 2. PRFAQ | Turn the research brief into a Working Backwards press release and FAQ | Style guide loader |
-| 3. Design Brief + Wireframe *(not yet built)* | Translate the approved PRFAQ into a design brief and a low-fidelity wireframe | — |
-| 4. BRD + Build Spec | Translate the approved PRFAQ into requirements (BRD) and format them into a coding-agent-ready build spec | Tavily (cost flags, API doc lookups), AWS Pricing API (exact per-unit pricing for cost flags) |
+| 3. Design Brief + Wireframe | Synthesizes the PRFAQ and research into a design brief: screen inventory, user flows, design principles, competitive UI patterns. Optionally generates visual wireframes (coming soon). | File reader, Obsidian (optional) |
+| 4. BRD + Build Spec | Translate the approved PRFAQ (and design brief, if present) into requirements (BRD) and format them into a coding-agent-ready build spec | Tavily (cost flags, API doc lookups), AWS Pricing API (exact per-unit pricing for cost flags) |
 
 The orchestrator lives in `src/pm_agent_system/crew.py`. Agent and task definitions are in `src/pm_agent_system/config/agents.yaml` and `tasks.yaml`. Each agent's outputs are validated against a Pydantic model in `src/pm_agent_system/models/`.
 

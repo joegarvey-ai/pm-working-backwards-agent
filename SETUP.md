@@ -147,7 +147,17 @@ Once `research` works, try the full pipeline:
 uv run pm_agent_system full-pipeline examples/input-brief-example.md
 ```
 
-This takes 5-10 minutes and costs $1-3. It produces four files in `output/`: a research brief, a PRFAQ, a BRD, and a build spec. Open each one.
+This takes 5-10 minutes and costs $1-3. It produces five files in `output/`: a research brief, a PRFAQ, a design brief (screen inventory, user flows, design principles), a BRD, and a build spec. Open each one.
+
+The pipeline pauses for your review after each artifact. After the design brief is approved you'll see one extra prompt asking how to proceed with visual wireframes — `[g]` (SVG generation, coming soon), `[b]` (take the brief to an external tool like Claude Design or Figma), or `[s]` (skip and continue to BRD without design references).
+
+If you don't need the design brief — for example, when you're iterating on an existing product and already have the screens mapped — add `--skip-design` to run the three-agent pipeline as before:
+
+```bash
+uv run pm_agent_system full-pipeline examples/input-brief-example.md --skip-design
+```
+
+**Visual style guide (optional).** If you want Agent 3 to apply your brand's colors, typography, and component preferences, copy the template at `examples/templates/visual-style-guide.md`, edit it with your brand assets, and set `VISUAL_STYLE_GUIDE_PATH` in `.env` (or fill in the `Visual Style Guide` field in your input brief).
 
 ## Step 9: Run on your own product problem
 

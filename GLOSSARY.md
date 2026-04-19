@@ -2,7 +2,7 @@
 
 Plain-English definitions for the terms used in this project. If a term in the README or SETUP isn't here, open an issue and we'll add it.
 
-**Agent.** A program that uses an LLM (here, Claude) to do one specific job. This project has three implemented today (Agent 1: Research, Agent 2: PRFAQ, Agent 4: BRD + Build Spec). Agent 3 is reserved for the planned Design Brief + Wireframe agent. Each agent has a role description, instructions, and a set of tools it can call.
+**Agent.** A program that uses an LLM (here, Claude) to do one specific job. This project has four agents (Agent 1: Research, Agent 2: PRFAQ, Agent 3: Design Brief + Wireframe, Agent 4: BRD + Build Spec). Each agent has a role description, instructions, and a set of tools it can call.
 
 **API Key.** A long string of characters that proves to an external service (Anthropic, Tavily) that you're allowed to use it. Treat API keys like passwords. Never share them, never commit them to git.
 
@@ -11,6 +11,12 @@ Plain-English definitions for the terms used in this project. If a term in the R
 **Build Spec.** A formatted document that a coding agent (Kiro, Claude Code, Cursor, or Lovable) can execute against. It contains user flows, feature specs with acceptance criteria, technical constraints, and an architecture reference — everything the coding tool needs to start building. Agent 4 produces this from the approved BRD, formatted for your chosen tool.
 
 **Cost flag.** An entry in the BRD that identifies an architectural decision with cost implications. Cost flags describe the decision, the tradeoff, and specific AWS pricing data — but they do not estimate total project cost. The PM and engineering lead evaluate cost using these flags as a starting point.
+
+**Design brief.** A structured document that translates the PRFAQ's customer experience narrative into concrete screens, user flows, and design principles. Produced by Agent 3. Feeds Agent 4 (BRD) with screen names and flow context so requirements reference specific UI elements rather than abstract descriptions. Optional — run the full pipeline with `--skip-design` to omit it.
+
+**Screen inventory.** A table in the design brief listing every key screen the product needs, with each screen's purpose and a reference to the PRFAQ section it traces to. Used by Agent 4 to write screen-specific user stories.
+
+**Visual style guide.** An optional file defining your brand's colors, typography, spacing, and component preferences. When provided, Agent 3 applies brand assets to wireframes and references them in the design brief. A sample template is at `examples/templates/visual-style-guide.md`. Configure via the `VISUAL_STYLE_GUIDE_PATH` env var or the `Visual Style Guide` field in your input brief.
 
 **CrewAI.** An open-source Python framework for building multi-agent systems. It handles the boring parts: passing messages between agents, retrying failed steps, validating outputs. We use it so we don't have to write that infrastructure ourselves. See [crewai.com](https://www.crewai.com/).
 
@@ -40,7 +46,7 @@ Plain-English definitions for the terms used in this project. If a term in the R
 
 **Tavily.** A web search API designed for LLMs. The research agent uses it to find market data, competitor information, and customer reviews on the public internet. See [tavily.com](https://tavily.com).
 
-**Wikilink.** A link between notes in Obsidian, written as `[[note name]]`. This system uses wikilinks to connect the artifact chain so you can navigate from research to PRFAQ to BRD to build spec using Obsidian's graph view.
+**Wikilink.** A link between notes in Obsidian, written as `[[note name]]`. This system uses wikilinks to connect the artifact chain so you can navigate from research to PRFAQ to design brief to BRD to build spec using Obsidian's graph view.
 
 **Working Backwards.** A product development approach where you start from the customer experience and work backward to the technology required to deliver it. The PRFAQ is the primary artifact of this process. This system automates the first draft of the Working Backwards artifacts.
 
