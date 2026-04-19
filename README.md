@@ -73,6 +73,10 @@ uv run pm_agent_system full-pipeline input/my-product.yaml
 
 See [examples/input.yaml](examples/input.yaml) for the YAML format.
 
+> **Note:** JSON input files (`.json`) from earlier versions are no longer
+> supported. If you have existing JSON inputs, convert them to markdown or
+> YAML format.
+
 ## Quick start
 
 Prerequisites: Python 3.11+, [uv](https://github.com/astral-sh/uv), an Anthropic API key, a Tavily API key.

@@ -14,9 +14,16 @@ Use this mode when you already have your own research and just need help draftin
 pm_agent_system generate <input_file> --research-path <research_file>
 ```
 
+The input file can be either the Obsidian-style markdown brief (recommended) or YAML.
+
 ## Example
 
 ```bash
+# Markdown input (recommended)
+pm_agent_system generate examples/standalone-prfaq/example_input.md \
+    --research-path examples/standalone-prfaq/example_research.md
+
+# YAML input (backward-compatible)
 pm_agent_system generate examples/standalone-prfaq/example_input.yaml \
     --research-path examples/standalone-prfaq/example_research.md
 ```
@@ -36,5 +43,6 @@ The agent is flexible about exact formatting. Include inline citations (`[source
 
 | File | Purpose |
 |---|---|
-| `example_input.yaml` | The 8-field structured input for a fictional "TaskFlow" product |
+| `example_input.md` | Obsidian-style markdown input brief (recommended format) |
+| `example_input.yaml` | Backward-compatible YAML version of the same brief |
 | `example_research.md` | A sample manually-written research document for TaskFlow |

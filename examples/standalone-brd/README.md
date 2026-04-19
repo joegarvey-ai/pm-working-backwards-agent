@@ -22,20 +22,28 @@ pm_agent_system brd <input_file> --prfaq-path <prfaq_file> --requirements-path <
 
 ## Examples
 
+The input file can be either the Obsidian-style markdown brief (recommended)
+or YAML. Both forms of `example_input` ship with this folder.
+
 ```bash
-# BRD from PRFAQ only
-pm_agent_system brd examples/standalone-brd/example_input.yaml \
+# BRD from PRFAQ only (markdown input)
+pm_agent_system brd examples/standalone-brd/example_input.md \
     --prfaq-path examples/standalone-brd/example_prfaq.md
 
 # BRD from PRFAQ + customer requirements (CSV)
-pm_agent_system brd examples/standalone-brd/example_input.yaml \
+pm_agent_system brd examples/standalone-brd/example_input.md \
     --prfaq-path examples/standalone-brd/example_prfaq.md \
     --requirements-path examples/standalone-brd/example_requirements.csv
 
 # BRD from PRFAQ + customer requirements (Markdown)
-pm_agent_system brd examples/standalone-brd/example_input.yaml \
+pm_agent_system brd examples/standalone-brd/example_input.md \
     --prfaq-path examples/standalone-brd/example_prfaq.md \
     --requirements-path examples/standalone-brd/example_requirements.md
+
+# BRD from PRFAQ + an approved design brief (Agent 3 output)
+pm_agent_system brd examples/standalone-brd/example_input.md \
+    --prfaq-path examples/standalone-brd/example_prfaq.md \
+    --design-brief-path output/design_brief_taskflow_v1.0.md
 ```
 
 ## Requirements file format
@@ -66,7 +74,8 @@ Every requirement in the BRD output has a `source` field: `customer_input`, `age
 
 | File | Purpose |
 |---|---|
-| `example_input.yaml` | The 8-field structured input for TaskFlow |
+| `example_input.md` | Obsidian-style markdown input brief (recommended format) |
+| `example_input.yaml` | Backward-compatible YAML version of the same brief |
 | `example_prfaq.md` | A sample approved PRFAQ for TaskFlow |
 | `example_requirements.csv` | 12 sample requirements in CSV format |
 | `example_requirements.md` | Same requirements in Markdown table format |
