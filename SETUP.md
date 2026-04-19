@@ -130,7 +130,7 @@ Save and close the file.
 Try the cheapest command first to make sure everything works:
 
 ```bash
-uv run pm_agent_system research examples/input.yaml
+uv run pm_agent_system research examples/input-brief-example.md
 ```
 
 This runs only Agent 1 (research). It should take 2-3 minutes and cost about $0.20. When it finishes, look in the `output/` folder. There will be a new file called something like `research_brief_20260408_143022.md`. Open it. That's what Agent 1 produces.
@@ -144,30 +144,32 @@ If you see an error about Python versions, you may need a newer Python. Run `pyt
 Once `research` works, try the full pipeline:
 
 ```bash
-uv run pm_agent_system full-pipeline examples/input.yaml
+uv run pm_agent_system full-pipeline examples/input-brief-example.md
 ```
 
 This takes 5-10 minutes and costs $1-3. It produces four files in `output/`: a research brief, a PRFAQ, a BRD, and a build spec. Open each one.
 
 ## Step 9: Run on your own product problem
 
-Make a copy of the example input:
+Copy the markdown template and fill it in:
 
 ```bash
-cp examples/input.yaml my_input.yaml
+cp examples/templates/input-brief-template.md my_input.md
 ```
 
-Open `my_input.yaml` in your editor and replace the contents with your own product problem. Keep the same structure (the field names like `feature_summary`, `goals`, `user_summary`). Be specific. Vague input produces vague output.
+Open `my_input.md` in your editor (or in Obsidian). Each section has an HTML comment explaining what to write. Replace the comments with your own content. Be specific — vague input produces vague output. Look at `examples/input-brief-example.md` to see the level of detail that produces good results.
 
-Two optional fields improve Obsidian vault organization if you have vault integration enabled:
-- `product_name` — a short name used for vault folder slugs (e.g., `"Analytics Dashboard"`)
-- `initiative` — groups products into nested folders (e.g., `"Commerce Platform"`)
+Two optional sections at the top improve Obsidian vault organization if you have vault integration enabled:
+- **Product Name** — a short name used for vault folder slugs (e.g., `Analytics Dashboard`)
+- **Initiative** — groups products into nested folders (e.g., `Commerce Platform`)
 
 Then run:
 
 ```bash
-uv run pm_agent_system full-pipeline my_input.yaml
+uv run pm_agent_system full-pipeline my_input.md
 ```
+
+If you prefer YAML over markdown (developers, CI/CD), the same commands accept `.yaml` files. See `examples/input.yaml` for the YAML format.
 
 ## Troubleshooting
 
@@ -179,7 +181,7 @@ uv run pm_agent_system full-pipeline my_input.yaml
 
 **"Rate limit exceeded"** — you're hitting Anthropic's rate limits. Wait a minute and try again, or upgrade your Anthropic tier.
 
-**Agent runs but the output is bad** — your input was probably too vague. Look at `examples/input.yaml` for the level of specificity that works. The agents can only research what you tell them to research.
+**Agent runs but the output is bad** — your input was probably too vague. Look at `examples/input-brief-example.md` (or `examples/input.yaml`) for the level of specificity that works. The agents can only research what you tell them to research.
 
 **Some other error** — open an issue on GitHub with the full error text. Don't include your `.env` file.
 

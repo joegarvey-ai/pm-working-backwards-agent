@@ -22,6 +22,8 @@ Plain-English definitions for the terms used in this project. If a term in the R
 
 **Human-in-the-loop checkpoint.** A pause between agents where the system stops and waits for your review. You read the output, decide if it's good enough, and either approve it (the next agent runs) or revise it (using the `revise` command). The system never auto-advances from one stage to the next without your approval.
 
+**Input brief.** The starting document you fill out to describe your product idea. Contains your product name, goals, target users, constraints, and any internal context. The pipeline reads this file and uses it as the foundation for all generated artifacts. Can be a markdown file (`.md`, recommended for most PMs) or a YAML file (`.yaml`/`.yml`, recommended for developers and automation). Both formats produce identical results. See `examples/input-brief-example.md` and `examples/input.yaml` for references.
+
 **Kiro.** A coding agent IDE built around spec-driven development. The build spec agent can format its output specifically for Kiro's expected spec structure. See [kiro.dev](https://kiro.dev).
 
 **MCP.** Model Context Protocol. A standard for letting LLMs talk to external tools and data sources. The optional Dovetail integration uses MCP under the hood.

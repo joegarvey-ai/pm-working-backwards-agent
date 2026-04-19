@@ -2,13 +2,13 @@
 
 An open-source multi-agent AI system that guides product managers from a rough problem statement through stakeholder-ready research, a Working Backwards PRFAQ, a BRD, and an engineer-ready build spec. Built on [CrewAI](https://www.crewai.com/) and Claude.
 
-This is for product managers, not engineers. If you can edit a YAML file and copy-paste an API key, you can run it. See [SETUP.md](SETUP.md) for a step-by-step walkthrough that assumes you have never used a terminal.
+This is for product managers, not engineers. If you can fill out a markdown template and copy-paste an API key, you can run it. See [SETUP.md](SETUP.md) for a step-by-step walkthrough that assumes you have never used a terminal.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A[input.yaml<br/>Problem statement] --> B[Agent 1<br/>Research]
+    A[input brief<br/>.md or .yaml] --> B[Agent 1<br/>Research]
     B --> C[research_brief.md]
     C --> D[Agent 2<br/>PRFAQ]
     D --> E[prfaq_v1.0.md]
@@ -34,6 +34,45 @@ This system does not replace your existing tools:
 
 This system is the connective layer between research and execution. It takes a product problem and produces the artifacts that bridge the gap between "we should build this" and "here's exactly what to build and why."
 
+## Input Format
+
+The pipeline accepts your product brief as either a markdown file (recommended)
+or a YAML file. Both produce identical results — pick whichever your workflow
+prefers.
+
+### Markdown (recommended for most PMs)
+
+Copy the template and fill it in:
+
+```bash
+cp examples/templates/input-brief-template.md input/my-product.md
+```
+
+Open `input/my-product.md` in your text editor or Obsidian and fill in each
+section. Then run:
+
+```bash
+uv run pm_agent_system full-pipeline input/my-product.md
+```
+
+If you use Obsidian with vault integration enabled, the input brief is
+automatically copied into your product's vault folder alongside the
+generated artifacts.
+
+See [examples/input-brief-example.md](examples/input-brief-example.md) for a
+completed reference.
+
+### YAML (for developers and automation)
+
+YAML input is still fully supported for CI/CD pipelines and developers who
+prefer it:
+
+```bash
+uv run pm_agent_system full-pipeline input/my-product.yaml
+```
+
+See [examples/input.yaml](examples/input.yaml) for the YAML format.
+
 ## Quick start
 
 Prerequisites: Python 3.11+, [uv](https://github.com/astral-sh/uv), an Anthropic API key, a Tavily API key.
@@ -44,12 +83,12 @@ cd pm-working-backwards-agent
 crewai install
 cp .env.example .env
 # Open .env and paste in your ANTHROPIC_API_KEY and TAVILY_API_KEY
-uv run pm_agent_system full-pipeline examples/input.yaml
+uv run pm_agent_system full-pipeline examples/input-brief-example.md
 ```
 
 The first run takes 5-10 minutes and produces files in `./output/`. See [examples/](examples/) for what those files look like.
 
-The `examples/` directory contains sample input files, standalone-mode examples, and templates (style guide, customer requirements formats in `examples/templates/`). The `input/` directory is where you put your own input files — see [input/README.md](input/README.md).
+The `examples/` directory contains sample input files (markdown and YAML), standalone-mode examples, and templates (style guide, customer requirements formats in `examples/templates/`). The `input/` directory is where you put your own input files — see [input/README.md](input/README.md).
 
 For a step-by-step setup walkthrough written for non-technical users, read [SETUP.md](SETUP.md).
 
@@ -69,17 +108,19 @@ This system runs in multiple environments. Choose the one that fits your workflo
 
 ## Common Scenarios
 
+Input file paths below show `.md` as the primary example. YAML input files (`.yaml`) are also supported — swap the extension and the rest of the command is identical.
+
 | I need to... | Command |
 |---|---|
-| Validate a product idea with market research | `uv run pm_agent_system research input/my-product.yaml` |
-| Write a stakeholder-ready PRFAQ from scratch | `uv run pm_agent_system generate input/my-product.yaml` |
-| Run the full pipeline end to end | `uv run pm_agent_system full-pipeline input/my-product.yaml` |
+| Validate a product idea with market research | `uv run pm_agent_system research input/my-product.md` |
+| Write a stakeholder-ready PRFAQ from scratch | `uv run pm_agent_system generate input/my-product.md` |
+| Run the full pipeline end to end | `uv run pm_agent_system full-pipeline input/my-product.md` |
 | Revise a PRFAQ after a stakeholder review meeting | `uv run pm_agent_system revise --prfaq-path prfaq_v1.0.md --context-path notes.md` |
-| Turn an approved PRFAQ into an engineer-ready BRD | `uv run pm_agent_system brd input/my-product.yaml --prfaq-path prfaq_v1.2.md` |
+| Turn an approved PRFAQ into an engineer-ready BRD | `uv run pm_agent_system brd input/my-product.md --prfaq-path prfaq_v1.2.md` |
 | Generate a Kiro build spec from a BRD | `uv run pm_agent_system build-spec --brd-path brd_v1.0.md --target-tool kiro` |
 | Update a BRD after engineering feedback | `uv run pm_agent_system revise-brd --brd-path brd_v1.0.md --context-text "FR-003 needs a GSI"` |
-| I have my own research and just need a PRFAQ | `uv run pm_agent_system generate input/my-product.yaml --research-path research.md` |
-| I have an approved PRFAQ and my own requirements | `uv run pm_agent_system brd input/my-product.yaml --prfaq-path prfaq.md --requirements-path requirements.csv` |
+| I have my own research and just need a PRFAQ | `uv run pm_agent_system generate input/my-product.md --research-path research.md` |
+| I have an approved PRFAQ and my own requirements | `uv run pm_agent_system brd input/my-product.md --prfaq-path prfaq.md --requirements-path requirements.csv` |
 | Skip the assumption-challenge step | Add `--skip-validation` to any research/generate/full-pipeline command |
 | Compare two document versions after a revision | `uv run pm_agent_system diff output/prfaq_v1.0.md output/prfaq_v1.1.md` |
 
@@ -102,28 +143,31 @@ To enable:
    name (default: `PM Agent`).
 
 Artifacts are written to `{vault}/{prefix}/{product-slug}/` with:
+- The PM's input brief (`input_brief.md`) — copied from your source file with frontmatter so the vault folder holds the complete artifact chain from idea to build spec
 - YAML frontmatter (tags, status, version, linked artifacts)
 - A dashboard note (`_index.md`) summarizing all artifacts for the product
 - Wikilinks connecting each artifact to its upstream and downstream neighbors
 - Version history — revisions create new version files rather than overwriting
 - A global map of content (`_all_products.md`) listing every product
 
-Two optional fields in your input YAML improve organization at scale:
-- `product_name` — a short name for cleaner vault folder slugs (otherwise derived from `feature_summary`)
-- `initiative` — groups products into nested folders (e.g., `PM Agent/Commerce Platform/analytics-dashboard/`)
+Two optional fields in your input brief improve organization at scale:
+- `Product Name` — a short name for cleaner vault folder slugs (otherwise derived from `Feature / Idea Summary`)
+- `Initiative` — groups products into nested folders (e.g., `PM Agent/Commerce Platform/analytics-dashboard/`)
 
 If your vault isn't set up, artifacts are still written to `output/` as usual.
 The vault is optional and additive.
 
 ## CLI commands
 
+Input file arguments below accept either `.md` (recommended) or `.yaml`/`.yml`.
+
 | Command | What it does |
 |---|---|
-| `research <input.yaml>` | Run Agent 1 only. Produces a research brief. |
-| `generate <input.yaml>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. |
+| `research <input>` | Run Agent 1 only. Produces a research brief. |
+| `generate <input>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. |
 | `revise --prfaq-path <file>` | Run Agent 2 to revise an existing PRFAQ. Pass `--context-text` or `--context-path` for the revision notes. |
-| `full-pipeline <input.yaml>` | Run all three agents end to end. Produces research brief, PRFAQ, BRD, and build spec. |
-| `brd <input.yaml> --prfaq-path <file>` | Run Agent 3 to produce a BRD and build spec from an approved PRFAQ. |
+| `full-pipeline <input>` | Run all three agents end to end. Produces research brief, PRFAQ, BRD, and build spec. |
+| `brd <input> --prfaq-path <file>` | Run Agent 3 to produce a BRD and build spec from an approved PRFAQ. |
 | `build-spec --brd-path <file>` | Regenerate just the build spec from an approved BRD. Useful when switching `--target-tool`. |
 | `revise-brd --brd-path <file>` | Revise an existing BRD. Pass `--context-text` or `--context-path` for the revision notes. |
 | `diff <old> <new>` | Compare two document versions section by section. Shows which sections were added, removed, or changed. Works best with agent-generated document pairs — manual header renames between versions appear as a deletion plus an addition rather than a single change. |
