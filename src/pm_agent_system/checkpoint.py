@@ -18,13 +18,16 @@ CHECKPOINT_FILENAME = ".checkpoint.json"
 
 
 def compute_input_hash(input_path: str) -> str:
-    """SHA-256 hash of the normalized input YAML.
+    """SHA-256 hash of the normalized input brief.
 
-    Normalization: read the YAML, re-dump with sorted keys and stripped
-    trailing whitespace so cosmetic edits don't bust the cache.
+    Works for both YAML (.yaml/.yml) and Obsidian-style markdown (.md):
+    parses through the unified input parser and re-dumps the resulting dict
+    with sorted keys so cosmetic edits and format swaps that produce the
+    same semantic content don't bust the resume cache.
     """
-    raw = Path(input_path).read_text(encoding="utf-8")
-    data = yaml.safe_load(raw)
+    from pm_agent_system.input_parser import parse_input
+
+    data = parse_input(input_path) or {}
     normalized = yaml.dump(data, sort_keys=True, default_flow_style=False).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 

@@ -2,11 +2,11 @@
 """CLI entry point for the PM Agent System.
 
 Usage:
-    # Agent 1 only — research brief
-    pm_agent_system research examples/input.yaml
+    # Agent 1 only — research brief (markdown input recommended; YAML also accepted)
+    pm_agent_system research examples/input-brief-example.md
 
     # Full pipeline — research → PRFAQ generate (Mode 1)
-    pm_agent_system generate examples/input.yaml
+    pm_agent_system generate examples/input-brief-example.md
 
     # Agent 2 only — revise an existing PRFAQ (Mode 2)
     pm_agent_system revise --prfaq-path output/prfaq_foo_v1.0.md \\
@@ -16,7 +16,6 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import os
 import re
@@ -40,6 +39,7 @@ from pm_agent_system.checkpoint import (
 )
 from pm_agent_system.crew import PmAgentSystem, _MODEL
 from pm_agent_system.html_export import markdown_to_html
+from pm_agent_system.input_parser import parse_input
 from pm_agent_system.pricing import estimate_cost, format_cost_summary
 from pm_agent_system.models import (
     VALID_TARGET_TOOLS,
@@ -58,6 +58,7 @@ from pm_agent_system.utils import (
     render_research_to_markdown,
 )
 from pm_agent_system.vault import (
+    copy_input_brief_to_vault,
     generate_index_note,
     get_initiative,
     get_product_slug,
@@ -91,20 +92,11 @@ OPTIONAL_FIELDS = ["publish_destination"]
 
 
 def load_input(file_path: str) -> dict:
-    """Load PM input from a YAML or JSON file."""
-    path = Path(file_path)
-    if not path.exists():
-        print(f"Error: Input file not found: {path}")
-        sys.exit(1)
-
-    content = path.read_text(encoding="utf-8")
-
-    if path.suffix in (".yaml", ".yml"):
-        return yaml.safe_load(content)
-    elif path.suffix == ".json":
-        return json.loads(content)
-    else:
-        print(f"Error: Unsupported file format '{path.suffix}'. Use .yaml, .yml, or .json.")
+    """Load PM input from a YAML or markdown file (deprecated alias for parse_input)."""
+    try:
+        return parse_input(file_path)
+    except ValueError as exc:
+        print(f"Error: {exc}")
         sys.exit(1)
 
 
@@ -394,7 +386,7 @@ def bump_version(version: str) -> str:
 
 def cmd_research(args: argparse.Namespace) -> None:
     """Run Agent 1 only and produce a research brief."""
-    inputs = validate_input(load_input(args.input_file))
+    inputs = validate_input(parse_input(args.input_file))
 
     publish_dir = validate_publish_destination(inputs.get("publish_destination", ""))
     if publish_dir:
@@ -451,6 +443,7 @@ def cmd_research(args: argparse.Namespace) -> None:
     print(f"\nResearch complete. Working copy saved to: {working_copy}")
 
     if vault_cfg:
+        copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if publish_dir:
@@ -471,7 +464,7 @@ def cmd_research(args: argparse.Namespace) -> None:
 
 def cmd_generate(args: argparse.Namespace) -> None:
     """Run the full pipeline: Agent 1 research → Agent 2 PRFAQ generate."""
-    inputs = validate_input(load_input(args.input_file))
+    inputs = validate_input(parse_input(args.input_file))
 
     publish_dir = validate_publish_destination(inputs.get("publish_destination", ""))
     if publish_dir:
@@ -538,6 +531,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
     print(f"\nPRFAQ complete. Working copy saved to: {working_copy}")
 
     if vault_cfg:
+        copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if publish_dir:
@@ -831,7 +825,7 @@ def _record_artifact_from_task_output(
 
 
 def cmd_full_pipeline(args: argparse.Namespace) -> None:
-    inputs = validate_input(load_input(args.input_file))
+    inputs = validate_input(parse_input(args.input_file))
     publish_dir = validate_publish_destination(inputs.get("publish_destination", ""))
 
     target_tool = (args.target_tool or os.getenv("DEFAULT_TARGET_TOOL", "kiro")).strip()
@@ -1033,6 +1027,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     print(f"Tool-ready formatted spec saved to: {spec_path}")
 
     if vault_cfg and product_slug:
+        copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     # Print cost summary
@@ -1062,7 +1057,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 
 
 def cmd_brd(args: argparse.Namespace) -> None:
-    inputs = validate_input(load_input(args.input_file))
+    inputs = validate_input(parse_input(args.input_file))
     prfaq_path = Path(args.prfaq_path).expanduser().resolve()
     if not prfaq_path.exists():
         print(f"Error: PRFAQ file not found: {prfaq_path}")
@@ -1201,6 +1196,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
     print(f"Formatted spec:       {spec_path}")
 
     if vault_cfg and product_slug:
+        copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
 
     if getattr(args, "open", False):
@@ -1520,7 +1516,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_research = sub.add_parser("research", help="Run Agent 1 only (research brief)")
-    p_research.add_argument("input_file", help="Path to YAML or JSON input file")
+    p_research.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
     p_research.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
     p_research.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_research.set_defaults(func=cmd_research)
@@ -1528,7 +1524,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_generate = sub.add_parser(
         "generate", help="Run Agent 1 then Agent 2 to produce a PRFAQ v1.0"
     )
-    p_generate.add_argument("input_file", help="Path to YAML or JSON input file")
+    p_generate.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
     p_generate.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
     p_generate.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_generate.set_defaults(func=cmd_generate)
@@ -1549,7 +1545,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "full-pipeline",
         help="Run all three agents end-to-end (research → PRFAQ → BRD → build spec)",
     )
-    p_full.add_argument("input_file", help="Path to YAML or JSON input file")
+    p_full.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
     p_full.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
     p_full.add_argument(
         "--target-tool",
@@ -1577,7 +1573,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "brd",
         help="Run Agent 3 only — generate BRD + build spec from an approved PRFAQ",
     )
-    p_brd.add_argument("input_file", help="Path to original YAML/JSON input (for context)")
+    p_brd.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
     p_brd.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
     p_brd.add_argument("--research-path", help="Optional path to research brief markdown")
     p_brd.add_argument(
@@ -1699,7 +1695,7 @@ def _load_default_inputs() -> dict:
     """Load the example input file for train/test commands."""
     example_path = Path(__file__).parent.parent.parent / "examples" / "input.yaml"
     if example_path.exists():
-        data = yaml.safe_load(example_path.read_text())
+        data = parse_input(str(example_path))
         data.pop("publish_destination", None)
         return data
     return {

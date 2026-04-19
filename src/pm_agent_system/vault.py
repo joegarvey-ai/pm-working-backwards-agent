@@ -658,6 +658,74 @@ def write_revision_to_vault(
         return ""
 
 
+# ---------- Input brief ----------
+
+
+def copy_input_brief_to_vault(
+    input_path: str,
+    product_slug: str,
+    vault_config: VaultConfig,
+) -> str:
+    """Copy the PM's input brief into the product vault folder as ``input_brief.md``.
+
+    Adds frontmatter (``artifact_type: input_brief``, ``status: active``).
+    Idempotent — if the existing vault copy already matches the source body,
+    leaves it alone. Markdown sources are copied verbatim into the body;
+    YAML/JSON sources are wrapped in a fenced code block so the brief is
+    still readable in Obsidian.
+
+    Returns the vault file path, or empty string on failure.
+    """
+    try:
+        src = Path(input_path)
+        if not src.exists():
+            return ""
+
+        folder = _product_folder(product_slug, vault_config)
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / "input_brief.md"
+
+        raw = src.read_text(encoding="utf-8")
+        suffix = src.suffix.lower()
+        if suffix == ".md":
+            # Strip any pre-existing frontmatter from the source so the wrapped
+            # body has exactly one frontmatter block (the one we add below).
+            body_source = _FRONTMATTER_RE.sub("", raw, count=1).lstrip("\n")
+        else:
+            lang = "yaml" if suffix in (".yaml", ".yml") else "json"
+            body_source = (
+                f"# Product Input Brief\n\n"
+                f"_Source: `{src.name}` (rendered from {lang.upper()})_\n\n"
+                f"```{lang}\n{raw.rstrip()}\n```\n"
+            )
+
+        # Idempotency: if vault copy exists and the body matches, skip the write.
+        if dest.exists():
+            existing = dest.read_text(encoding="utf-8")
+            existing_body = strip_frontmatter(existing)
+            if existing_body.strip() == body_source.strip():
+                return str(dest)
+
+        fm = {
+            "artifact_type": "input_brief",
+            "product_slug": product_slug,
+            "status": "active",
+            "source_path": str(src),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if vault_config.initiative:
+            fm["initiative"] = vault_config.initiative
+        fm_str = yaml.dump(fm, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+        dest.write_text(f"---\n{fm_str}---\n\n{body_source}", encoding="utf-8")
+        logger.info("Input brief copied to vault: %s", dest)
+        return str(dest)
+
+    except Exception as exc:
+        logger.warning("Failed to copy input brief to vault: %s", exc)
+        return ""
+
+
 # ---------- Dashboard note ----------
 
 
@@ -676,8 +744,15 @@ def generate_index_note(
         folder = _product_folder(product_slug, vault_config)
         folder.mkdir(parents=True, exist_ok=True)
 
-        # Build the artifact status table by reading frontmatter of each artifact.
+        # Build the artifact status table — input brief first, then ARTIFACT_CHAIN.
         rows: list[str] = []
+
+        brief_path = folder / "input_brief.md"
+        if brief_path.exists():
+            rows.append(f"| Input Brief | — | active | [[input_brief]] |")
+        else:
+            rows.append(f"| Input Brief | — | — | not yet copied |")
+
         for artifact_type in ARTIFACT_CHAIN:
             display_name = ARTIFACT_DISPLAY_NAMES[artifact_type]
             # Find the latest version file
