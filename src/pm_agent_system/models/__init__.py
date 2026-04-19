@@ -14,6 +14,12 @@ from pm_agent_system.models.coding_prompt_output import (
     FeatureSpec,
     UserFlow,
 )
+from pm_agent_system.models.design_brief_output import (
+    DesignBriefOutput,
+    DesignFlowStep,
+    DesignUserFlow,
+    ScreenEntry,
+)
 from pm_agent_system.models.prfaq_output import FAQ, PRFAQOutput, VersionEntry
 from pm_agent_system.models.research_output import (
     CompetitorAnalysis,
@@ -31,6 +37,9 @@ __all__ = [
     "CompetitorAnalysis",
     "CostFlag",
     "CustomerQuote",
+    "DesignBriefOutput",
+    "DesignFlowStep",
+    "DesignUserFlow",
     "FAQ",
     "FeatureSpec",
     "FunctionalRequirement",
@@ -41,6 +50,7 @@ __all__ = [
     "PRFAQOutput",
     "ResearchOutput",
     "Risk",
+    "ScreenEntry",
     "SuccessMetric",
     "UserFlow",
     "UserStory",

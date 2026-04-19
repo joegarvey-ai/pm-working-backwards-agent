@@ -38,6 +38,9 @@ FIELD_DISPLAY_NAMES: dict[str, str] = {
     "success_metrics": "Success Metrics",
     "timeline_and_milestones": "Timeline & Milestones",
     "technical_context_and_dependencies": "Technical Context & Dependencies",
+    # DesignBriefOutput
+    "accessibility_considerations": "Accessibility",
+    "platform_targets": "Platform Targets",
     # CodingPromptOutput
     "user_flows": "User Flows",
     "feature_specs": "Feature Specs",
