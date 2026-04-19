@@ -82,7 +82,7 @@ def _minimal_brd():
             Risk(description="R2", likelihood="low", impact="med", mitigation="M"),
         ],
         success_metrics=[SuccessMetric(metric="M", target_value="V", measurement_method="CM", timeline="Q3")],
-        version_history=[VersionEntry(version="1.0", date="2026-04-15", author="Agent 3", changes="Init")],
+        version_history=[VersionEntry(version="1.0", date="2026-04-15", author="Agent 4", changes="Init")],
     )
 
 
@@ -200,7 +200,7 @@ def test_input_hash_changes_on_content_change(tmp_path):
 
 
 def test_resume_skips_completed_agents(output_dir, example_input):
-    """--resume with research+PRFAQ done should only run Agent 3."""
+    """--resume with research+PRFAQ done should only run Agent 4."""
     # Create fake artifact files and a checkpoint
     rb_path = output_dir / "research_brief_20260415.md"
     rb_path.write_text("# Research")
@@ -213,7 +213,7 @@ def test_resume_skips_completed_agents(output_dir, example_input):
     record_artifact(ckpt, "prfaq", str(prfaq_path))
     save_checkpoint(output_dir, ckpt)
 
-    # Mock only brd_from_prfaq_crew (the Agent 3 path)
+    # Mock only brd_from_prfaq_crew (the Agent 4 path)
     mock_result = _mock_crew_result([_minimal_brd(), _minimal_spec()])
 
     with patch("pm_agent_system.main.PmAgentSystem") as MockCrew:
@@ -232,7 +232,7 @@ def test_resume_skips_completed_agents(output_dir, example_input):
         )
         cmd_full_pipeline(args)
 
-    # Agent 3 crew was called
+    # Agent 4 crew was called
     instance.brd_from_prfaq_crew.assert_called_once()
 
 

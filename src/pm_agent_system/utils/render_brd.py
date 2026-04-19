@@ -19,7 +19,7 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
     """
     latest = output.version_history[-1] if output.version_history else None
     version = latest.version if latest else "1.0"
-    author = latest.author if latest else "Agent 3"
+    author = latest.author if latest else "Agent 4"
     last_updated = latest.date if latest else date.today().isoformat()
     created = output.version_history[0].date if output.version_history else last_updated
 

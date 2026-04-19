@@ -91,7 +91,7 @@ def _minimal_brd() -> BRDOutput:
             SuccessMetric(metric="Adoption", target_value="1000 users", measurement_method="Analytics", timeline="Q3"),
         ],
         version_history=[
-            VersionEntry(version="1.0", date="2026-04-15", author="Agent 3", changes="Initial")
+            VersionEntry(version="1.0", date="2026-04-15", author="Agent 4", changes="Initial")
         ],
     )
 

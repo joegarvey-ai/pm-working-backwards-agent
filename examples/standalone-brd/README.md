@@ -1,6 +1,6 @@
-# Standalone BRD Mode (Agent 3 Only)
+# Standalone BRD Mode (Agent 4 Only)
 
-Use this mode when you already have an approved PRFAQ from another process and want to generate a BRD and build spec. Agents 1 and 2 are skipped entirely. You can optionally provide your own customer requirements file, which Agent 3 will reconcile against the PRFAQ.
+Use this mode when you already have an approved PRFAQ from another process and want to generate a BRD and build spec. Agents 1 and 2 are skipped entirely. You can optionally provide your own customer requirements file, which Agent 4 will reconcile against the PRFAQ.
 
 ## When to use this
 
@@ -53,7 +53,7 @@ See `examples/templates/` for blank templates in CSV and Markdown formats.
 
 ## How requirements reconciliation works
 
-When you provide a requirements file, Agent 3 does not blindly include them. It reconciles:
+When you provide a requirements file, Agent 4 does not blindly include them. It reconciles:
 
 1. **Keeps** requirements that align with the PRFAQ, preserving your wording and priority
 2. **Flags** requirements that contradict or aren't traceable to the PRFAQ

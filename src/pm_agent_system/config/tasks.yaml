@@ -533,7 +533,7 @@ generate_brd_chained:
         measurement_method (e.g., "CloudWatch custom metric"), timeline.
     11. **Timeline and milestones** — high-level phases.
     12. **Version history** — start with v1.0, today's date, author
-        "Agent 3", changes "Initial draft generated from approved PRFAQ."
+        "Agent 4", changes "Initial draft generated from approved PRFAQ."
 
     ## Customer Requirements Handling (when requirements file is provided)
 
@@ -627,7 +627,7 @@ revise_brd:
     6. **Maintain AWS-first defaults** and traceability rules in any
        new content.
     7. **Append a new version history entry.** Bump the version
-       (1.0 -> 1.1, etc.). Today's date. Author "Agent 3". Changes field
+       (1.0 -> 1.1, etc.). Today's date. Author "Agent 4". Changes field
        summarizes what was revised and why in 1-2 sentences.
     8. **Return the full BRDOutput** with all sections — updated and
        preserved alike.
@@ -795,7 +795,7 @@ generate_brd_standalone:
     9. **Risks** — minimum 2.
     10. **Success metrics** — minimum 1.
     11. **Timeline and milestones**.
-    12. **Version history** — start with v1.0, today's date, author "Agent 3".
+    12. **Version history** — start with v1.0, today's date, author "Agent 4".
 
     ## Customer Requirements Handling (when requirements file is provided)
 

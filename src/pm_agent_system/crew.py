@@ -40,7 +40,10 @@ class PmAgentSystem:
     Three agents are scaffolded:
       - Agent 1: Research Agent (research_task)
       - Agent 2: PRFAQ Agent (generate_prfaq, revise_prfaq)
-      - Agent 3: BRD + Build Spec Agent (generate_brd, revise_brd, generate_build_spec)
+      - Agent 4: BRD + Build Spec Agent (generate_brd, revise_brd, generate_build_spec)
+
+    Agent 3 is reserved for the planned Design Brief + Wireframe agent
+    (not yet built).
 
     Multiple crew builders compose subsets of agents/tasks for the
     different operating modes (research-only, full pipeline, BRD-only,
@@ -229,7 +232,7 @@ class PmAgentSystem:
         )
 
     def full_pipeline_crew(self, skip_validation: bool = False) -> Crew:
-        """Agent 1 → Agent 2 → Agent 3 (research → PRFAQ → BRD → build spec)."""
+        """Agent 1 → Agent 2 → Agent 4 (research → PRFAQ → BRD → build spec)."""
         tasks = self._research_tasks(skip_validation)
         research = tasks[-1]
         prfaq_task = Task(
@@ -256,7 +259,7 @@ class PmAgentSystem:
         )
 
     def brd_from_prfaq_crew(self) -> Crew:
-        """Agent 3 only — generate BRD then build spec from approved PRFAQ on disk.
+        """Agent 4 only — generate BRD then build spec from approved PRFAQ on disk.
 
         Both tasks are constructed without prior-task context; the agent
         reads the PRFAQ and research from disk via file_reader using the
@@ -276,7 +279,7 @@ class PmAgentSystem:
         )
 
     def revise_brd_crew(self) -> Crew:
-        """Agent 3 only (BRD revision Mode 2)."""
+        """Agent 4 only (BRD revision Mode 2)."""
         return Crew(
             agents=[self.brd_agent()],
             tasks=[self.revise_brd()],
@@ -285,7 +288,7 @@ class PmAgentSystem:
         )
 
     def regenerate_build_spec_crew(self) -> Crew:
-        """Agent 3 only — regenerate build spec from approved BRD on disk (Mode 3)."""
+        """Agent 4 only — regenerate build spec from approved BRD on disk (Mode 3)."""
         return Crew(
             agents=[self.brd_agent()],
             tasks=[self.generate_build_spec_standalone()],

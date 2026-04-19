@@ -12,13 +12,13 @@ flowchart LR
     B --> C[research_brief.md]
     C --> D[Agent 2<br/>PRFAQ]
     D --> E[prfaq_v1.0.md]
-    E --> F[Agent 3<br/>BRD + Build Spec]
+    E --> F[Agent 4<br/>BRD + Build Spec]
     F --> G[brd_v1.0.md]
     F --> I[build_spec.md]
     I --> J[Drop into<br/>Kiro / Claude Code / Cursor]
 ```
 
-> Three agents, four artifacts. Agent 3 produces two artifacts in sequence — the BRD first, then the build spec after you approve the BRD. In the code, these are two tasks within one agent, not two separate agents.
+> Three agents implemented today (Agents 1, 2, 4), four artifacts. Agent 4 produces two artifacts in sequence — the BRD first, then the build spec after you approve the BRD. In the code, these are two tasks within one agent, not two separate agents. Agent 3 is reserved for the planned Design Brief + Wireframe agent (not yet built).
 
 You write a short problem statement. The agents do the research, write the Working Backwards document, translate it into requirements, and produce a build spec your engineers (or coding agent) can run with. You stay in the loop at every handoff.
 
@@ -29,7 +29,7 @@ This system does not replace your existing tools:
 - **Not a replacement for Jira or Linear.** It produces requirements, not tickets. You take the BRD's user stories and create tickets in your project management tool.
 - **Not a replacement for Confluence or Notion.** It generates documents (PRFAQ, BRD) that you publish to your wiki. It references your existing docs rather than duplicating them.
 - **Not a replacement for Figma or design tools.** The build spec describes what to build, not how it should look. Design happens alongside or after the BRD.
-- **Not a replacement for your coding IDE.** Agent 3 produces a build spec that you load into Kiro, Claude Code, Cursor, or Lovable. The coding happens in your tool of choice.
+- **Not a replacement for your coding IDE.** Agent 4 produces a build spec that you load into Kiro, Claude Code, Cursor, or Lovable. The coding happens in your tool of choice.
 - **Not a replacement for PM judgment.** Every artifact has a human review checkpoint. The system accelerates your first draft — you own the final version.
 
 This system is the connective layer between research and execution. It takes a product problem and produces the artifacts that bridge the gap between "we should build this" and "here's exactly what to build and why."
@@ -167,7 +167,7 @@ Input file arguments below accept either `.md` (recommended) or `.yaml`/`.yml`.
 | `generate <input>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. |
 | `revise --prfaq-path <file>` | Run Agent 2 to revise an existing PRFAQ. Pass `--context-text` or `--context-path` for the revision notes. |
 | `full-pipeline <input>` | Run all three agents end to end. Produces research brief, PRFAQ, BRD, and build spec. |
-| `brd <input> --prfaq-path <file>` | Run Agent 3 to produce a BRD and build spec from an approved PRFAQ. |
+| `brd <input> --prfaq-path <file>` | Run Agent 4 to produce a BRD and build spec from an approved PRFAQ. |
 | `build-spec --brd-path <file>` | Regenerate just the build spec from an approved BRD. Useful when switching `--target-tool`. |
 | `revise-brd --brd-path <file>` | Revise an existing BRD. Pass `--context-text` or `--context-path` for the revision notes. |
 | `diff <old> <new>` | Compare two document versions section by section. Shows which sections were added, removed, or changed. Works best with agent-generated document pairs — manual header renames between versions appear as a deletion plus an addition rather than a single change. |
@@ -195,13 +195,14 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 
 ## Architecture
 
-Three agents, each with a single job, chained by a CrewAI orchestrator. Agent 3 produces two artifacts (BRD, then build spec) as two sequential tasks within one agent.
+Three agents implemented today, each with a single job, chained by a CrewAI orchestrator. Agent 4 produces two artifacts (BRD, then build spec) as two sequential tasks within one agent. Agent 3 is reserved for the planned Design Brief + Wireframe agent.
 
 | Agent | Job | Tools |
 |---|---|---|
 | 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, competitive intelligence (G2/Capterra/TrustRadius), Dovetail (optional), Obsidian (optional), file readers |
 | 2. PRFAQ | Turn the research brief into a Working Backwards press release and FAQ | Style guide loader |
-| 3. BRD + Build Spec | Translate the approved PRFAQ into requirements (BRD) and format them into a coding-agent-ready build spec | Tavily (cost flags, API doc lookups), AWS Pricing API (exact per-unit pricing for cost flags) |
+| 3. Design Brief + Wireframe *(not yet built)* | Translate the approved PRFAQ into a design brief and a low-fidelity wireframe | — |
+| 4. BRD + Build Spec | Translate the approved PRFAQ into requirements (BRD) and format them into a coding-agent-ready build spec | Tavily (cost flags, API doc lookups), AWS Pricing API (exact per-unit pricing for cost flags) |
 
 The orchestrator lives in `src/pm_agent_system/crew.py`. Agent and task definitions are in `src/pm_agent_system/config/agents.yaml` and `tasks.yaml`. Each agent's outputs are validated against a Pydantic model in `src/pm_agent_system/models/`.
 

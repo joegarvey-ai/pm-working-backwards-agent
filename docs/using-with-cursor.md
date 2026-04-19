@@ -17,4 +17,4 @@ uv run pm_agent_system full-pipeline examples/input.yaml
 You can also run the pipeline conversationally through Cursor's Composer. Paste the contents of a skill file (from `.kiro/skills/`) into the Composer and ask it to guide you through that step.
 
 ## Build Spec Integration
-When Agent 3 generates a build spec with `target_tool: cursor`, the output is formatted as a Composer-ready prompt. Open it in Composer and Cursor will execute the build.
+When Agent 4 generates a build spec with `target_tool: cursor`, the output is formatted as a Composer-ready prompt. Open it in Composer and Cursor will execute the build.

@@ -9,8 +9,8 @@ This directory contains a complete sample run of PM Working Backwards Agent on a
 | `input.yaml` | The starting input. A short problem statement, goals, target users, success metrics, and constraints. This is what you'd write to kick off a run. |
 | `research_brief.md` | What Agent 1 (Research) produces. Market sizing, competitive landscape, customer evidence, gaps and open questions. |
 | `prfaq_v1.0.md` | What Agent 2 (PRFAQ) produces from the research brief. A Working Backwards press release, FAQ, and customer quotes. |
-| `brd_v1.0.md` | What Agent 3 (BRD) produces from the approved PRFAQ. Functional requirements, non-functional requirements, scope boundaries, dependencies. |
-| `build_spec_kiro_formatted.md` | What Agent 4 (Build Spec) produces from the BRD. A Kiro-formatted spec ready to drop into a coding agent. |
+| `brd_v1.0.md` | What Agent 4 (BRD + Build Spec) produces first from the approved PRFAQ. Functional requirements, non-functional requirements, scope boundaries, dependencies. |
+| `build_spec_kiro_formatted.md` | The second artifact Agent 4 produces (after BRD approval). A Kiro-formatted spec ready to drop into a coding agent. |
 
 ## How to use these examples
 

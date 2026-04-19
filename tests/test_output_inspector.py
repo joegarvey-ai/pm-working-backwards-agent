@@ -107,7 +107,7 @@ def _brd_with_empty_risks() -> BRDOutput:
         timeline_and_milestones="",
         technical_context_and_dependencies="",
         version_history=[
-            VersionEntry(version="1.0", date="2026-04-15", author="Agent 3", changes="Init"),
+            VersionEntry(version="1.0", date="2026-04-15", author="Agent 4", changes="Init"),
         ],
     )
 
@@ -147,7 +147,7 @@ def _brd_fully_populated() -> BRDOutput:
         ],
         timeline_and_milestones="Phase 1: Q3",
         version_history=[
-            VersionEntry(version="1.0", date="2026-04-15", author="Agent 3", changes="Init"),
+            VersionEntry(version="1.0", date="2026-04-15", author="Agent 4", changes="Init"),
         ],
     )
 

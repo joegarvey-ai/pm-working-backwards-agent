@@ -19,7 +19,8 @@ This project is a multi-agent AI system that takes a product problem statement a
 1. PM provides structured input (7 fields + optional business context)
 2. Agent 1 (Research): Tavily search + internal docs + Dovetail → ResearchOutput
 3. Agent 2 (PRFAQ): Working Backwards document with press release, FAQs, customer experience narrative
-4. Agent 3 (BRD + Build Spec): Requirements with code samples, then tool-specific build spec
+4. Agent 4 (BRD + Build Spec): Requirements with code samples, then tool-specific build spec
+   (Agent 3 is reserved for the planned Design Brief + Wireframe agent.)
 
 ## Style Rules
 - No em dashes as punctuation

@@ -1,6 +1,6 @@
 # Customer Requirements Template
 
-Use this template to provide pre-existing customer requirements to the PM Agent System. Agent 3 will reconcile these against the approved PRFAQ when generating the BRD.
+Use this template to provide pre-existing customer requirements to the PM Agent System. Agent 4 will reconcile these against the approved PRFAQ when generating the BRD.
 
 ## Required elements per requirement
 

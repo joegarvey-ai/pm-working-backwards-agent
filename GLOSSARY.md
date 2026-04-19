@@ -2,13 +2,13 @@
 
 Plain-English definitions for the terms used in this project. If a term in the README or SETUP isn't here, open an issue and we'll add it.
 
-**Agent.** A program that uses an LLM (here, Claude) to do one specific job. This project has three: Research, PRFAQ, and BRD + Build Spec. Each agent has a role description, instructions, and a set of tools it can call.
+**Agent.** A program that uses an LLM (here, Claude) to do one specific job. This project has three implemented today (Agent 1: Research, Agent 2: PRFAQ, Agent 4: BRD + Build Spec). Agent 3 is reserved for the planned Design Brief + Wireframe agent. Each agent has a role description, instructions, and a set of tools it can call.
 
 **API Key.** A long string of characters that proves to an external service (Anthropic, Tavily) that you're allowed to use it. Treat API keys like passwords. Never share them, never commit them to git.
 
-**BRD (Business Requirements Document).** A structured document that translates a product concept into engineer-ready requirements. Includes user stories, functional requirements with acceptance criteria, non-functional requirements, cost flags, and risk assessments. In this system, Agent 3 produces the BRD from an approved PRFAQ. Where the PRFAQ says "merchants can drill into a SKU's funnel," the BRD says "FR-3: Filter by SKU (single or multi-select), priority P0."
+**BRD (Business Requirements Document).** A structured document that translates a product concept into engineer-ready requirements. Includes user stories, functional requirements with acceptance criteria, non-functional requirements, cost flags, and risk assessments. In this system, Agent 4 produces the BRD from an approved PRFAQ. Where the PRFAQ says "merchants can drill into a SKU's funnel," the BRD says "FR-3: Filter by SKU (single or multi-select), priority P0."
 
-**Build Spec.** A formatted document that a coding agent (Kiro, Claude Code, Cursor, or Lovable) can execute against. It contains user flows, feature specs with acceptance criteria, technical constraints, and an architecture reference — everything the coding tool needs to start building. Agent 3 produces this from the approved BRD, formatted for your chosen tool.
+**Build Spec.** A formatted document that a coding agent (Kiro, Claude Code, Cursor, or Lovable) can execute against. It contains user flows, feature specs with acceptance criteria, technical constraints, and an architecture reference — everything the coding tool needs to start building. Agent 4 produces this from the approved BRD, formatted for your chosen tool.
 
 **Cost flag.** An entry in the BRD that identifies an architectural decision with cost implications. Cost flags describe the decision, the tradeoff, and specific AWS pricing data — but they do not estimate total project cost. The PM and engineering lead evaluate cost using these flags as a starting point.
 
@@ -36,7 +36,7 @@ Plain-English definitions for the terms used in this project. If a term in the R
 
 **Pydantic.** A Python library that defines what a piece of data should look like and validates it. We use it to make sure each agent's output has the right shape (e.g., a research brief always has a "Sources" section). If an agent returns the wrong shape, Pydantic catches it before the next agent runs.
 
-**Reconciliation (requirements).** When you provide a pre-existing requirements file via `--requirements-path`, Agent 3 compares your requirements against the approved PRFAQ. Requirements that align are kept. Requirements that contradict the PRFAQ are flagged. Gaps in your list (requirements implied by the PRFAQ but not in your file) are filled by the agent and marked as "agent-generated."
+**Reconciliation (requirements).** When you provide a pre-existing requirements file via `--requirements-path`, Agent 4 compares your requirements against the approved PRFAQ. Requirements that align are kept. Requirements that contradict the PRFAQ are flagged. Gaps in your list (requirements implied by the PRFAQ but not in your file) are filled by the agent and marked as "agent-generated."
 
 **Tavily.** A web search API designed for LLMs. The research agent uses it to find market data, competitor information, and customer reviews on the public internet. See [tavily.com](https://tavily.com).
 

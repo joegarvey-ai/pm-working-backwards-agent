@@ -1,4 +1,4 @@
-"""AWS Pricing API tool for Agent 3 cost flagging.
+"""AWS Pricing API tool for Agent 4 cost flagging.
 
 Uses the public AWS Price List API via boto3 to look up current pricing
 for AWS services. The Pricing API endpoint is only available in

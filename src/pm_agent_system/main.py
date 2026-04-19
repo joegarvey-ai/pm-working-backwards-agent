@@ -940,10 +940,10 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         handlers=handlers, vault_cfg=vault_cfg, product_slug=product_slug,
     )
 
-    # --- Resume path: only Agent 3 (BRD + build spec) ---
+    # --- Resume path: only Agent 4 (BRD + build spec) ---
     try:
         if not need_research and not need_prfaq and need_brd:
-            print(f"\nResuming Agent 3 (BRD + build spec) for: {label[:80]}...")
+            print(f"\nResuming Agent 4 (BRD + build spec) for: {label[:80]}...")
 
             # Find the PRFAQ and research paths from the checkpoint
             existing_ckpt = load_checkpoint(output_dir) or {}
@@ -973,12 +973,12 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                 crew.task_callback = _resume_task_callback
                 result = crew.kickoff(inputs=crew_inputs)
             except Exception as e:
-                print(f"\nError running Agent 3: {e}")
+                print(f"\nError running Agent 4: {e}")
                 sys.exit(1)
 
             spec = extract_pydantic_output(result, CodingPromptOutput)
             if spec is None:
-                print("\nError: Agent 3 did not return a valid CodingPromptOutput.")
+                print("\nError: Agent 4 did not return a valid CodingPromptOutput.")
                 sys.exit(1)
 
         else:
@@ -1053,7 +1053,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             webbrowser.open(html_candidates[0].resolve().as_uri())
 
 
-# ---------- Subcommand: brd (Agent 3, BRD + build spec from approved PRFAQ) ----------
+# ---------- Subcommand: brd (Agent 4, BRD + build spec from approved PRFAQ) ----------
 
 
 def cmd_brd(args: argparse.Namespace) -> None:
@@ -1205,7 +1205,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
             webbrowser.open(html_candidates[0].resolve().as_uri())
 
 
-# ---------- Subcommand: build-spec (Agent 3 Mode 3) ----------
+# ---------- Subcommand: build-spec (Agent 4 Mode 3) ----------
 
 
 def cmd_build_spec(args: argparse.Namespace) -> None:
@@ -1294,7 +1294,7 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
         generate_index_note(product_slug, vault_cfg)
 
 
-# ---------- Subcommand: revise-brd (Agent 3 Mode 2) ----------
+# ---------- Subcommand: revise-brd (Agent 4 Mode 2) ----------
 
 
 def cmd_revise_brd(args: argparse.Namespace) -> None:
@@ -1385,7 +1385,7 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
 
     brd = extract_pydantic_output(result, BRDOutput)
     if brd is None:
-        print("\nError: Agent 3 did not return a valid BRDOutput.")
+        print("\nError: Agent 4 did not return a valid BRDOutput.")
         sys.exit(1)
 
     record = provider.artifacts.get("brd")
@@ -1539,7 +1539,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_revise.set_defaults(func=cmd_revise)
 
-    # ----- Agent 3 commands -----
+    # ----- Agent 4 commands -----
 
     p_full = sub.add_parser(
         "full-pipeline",
@@ -1571,7 +1571,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_brd = sub.add_parser(
         "brd",
-        help="Run Agent 3 only — generate BRD + build spec from an approved PRFAQ",
+        help="Run Agent 4 only — generate BRD + build spec from an approved PRFAQ",
     )
     p_brd.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
     p_brd.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
@@ -1586,7 +1586,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_spec = sub.add_parser(
         "build-spec",
-        help="Run Agent 3 only — regenerate build spec from an approved BRD",
+        help="Run Agent 4 only — regenerate build spec from an approved BRD",
     )
     p_spec.add_argument("--brd-path", required=True, help="Path to approved BRD markdown")
     p_spec.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
@@ -1594,7 +1594,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_rbrd = sub.add_parser(
         "revise-brd",
-        help="Run Agent 3 only — revise an existing BRD",
+        help="Run Agent 4 only — revise an existing BRD",
     )
     p_rbrd.add_argument("--brd-path", required=True, help="Path to current BRD markdown")
     p_rbrd.add_argument("--context-path", help="File or folder with revision context")

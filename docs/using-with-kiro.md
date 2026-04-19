@@ -45,7 +45,7 @@ uv run pm_agent_system full-pipeline examples/input.yaml --target-tool kiro
 ```
 
 ## Build Spec Integration
-When Agent 3 produces a build spec with `target_tool: kiro`, the output is formatted as a Kiro-compatible spec with requirements, design, and tasks sections. You can open it directly in Kiro and use spec-driven development to generate the implementation.
+When Agent 4 produces a build spec with `target_tool: kiro`, the output is formatted as a Kiro-compatible spec with requirements, design, and tasks sections. You can open it directly in Kiro and use spec-driven development to generate the implementation.
 
 ## Tips
 - The steering files load automatically. You do not need to reference them.
