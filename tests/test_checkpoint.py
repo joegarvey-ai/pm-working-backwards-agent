@@ -229,6 +229,7 @@ def test_resume_skips_completed_agents(output_dir, example_input):
             input_file=example_input, target_tool="kiro",
             requirements_path=None, skip_validation=False,
             resume=True, fresh=False,
+            skip_design=True,  # no design brief in the checkpoint
         )
         cmd_full_pipeline(args)
 

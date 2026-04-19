@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 ARTIFACT_DISPLAY_NAMES = {
     "research_brief": "Research brief",
     "prfaq": "PRFAQ",
+    "design_brief": "Design brief",
     "brd": "BRD",
     "build_spec": "Build spec",
 }

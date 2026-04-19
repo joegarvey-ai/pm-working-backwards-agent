@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 ARTIFACT_DISPLAY_NAMES: dict[str, str] = {
     "research_brief": "Research Brief",
     "prfaq": "PRFAQ",
+    "design_brief": "Design Brief",
     "brd": "BRD",
     "build_spec": "Build Spec",
 }
@@ -35,12 +36,19 @@ ARTIFACT_DISPLAY_NAMES: dict[str, str] = {
 ARTIFACT_AGENTS: dict[str, str] = {
     "research_brief": "Research Agent",
     "prfaq": "PRFAQ Agent",
+    "design_brief": "Design Brief Agent",
     "brd": "BRD Agent",
     "build_spec": "Build Spec Agent",
 }
 
 # Ordered artifact chain for traceability links.
-ARTIFACT_CHAIN = ["research_brief", "prfaq", "brd", "build_spec"]
+ARTIFACT_CHAIN = ["research_brief", "prfaq", "design_brief", "brd", "build_spec"]
+
+# Artifact types that are stored in a named subfolder inside the product folder.
+# Keeps wireframe-related artifacts grouped together in the vault.
+ARTIFACT_SUBFOLDERS: dict[str, str] = {
+    "design_brief": "wireframes",
+}
 
 
 # ---------- Data classes ----------
@@ -206,6 +214,13 @@ def _artifact_filename(artifact_type: str, version: str | None = None) -> str:
     return artifact_type
 
 
+def _artifact_type_from_filename(filename: str | None) -> str | None:
+    """Strip version suffix (``_vX.Y``) from a filename to recover the artifact type."""
+    if not filename:
+        return None
+    return re.sub(r"_v\d+\.\d+$", "", filename)
+
+
 def inject_traceability_section(
     markdown_content: str,
     artifact_type: str,
@@ -214,18 +229,24 @@ def inject_traceability_section(
 ) -> str:
     """Insert a one-line traceability callout after frontmatter, before the first heading.
 
-    Shows the artifact chain with the current artifact bolded.
+    Shows the artifact chain with the current artifact bolded. Wikilinks
+    are only rendered for chain nodes that match the upstream/downstream
+    filenames provided — so callers that point directly to a non-adjacent
+    artifact (e.g. PRFAQ → BRD when --skip-design is set) still get
+    accurate links.
     """
+    upstream_type = _artifact_type_from_filename(upstream_file)
+    downstream_type = _artifact_type_from_filename(downstream_file)
+
     chain_parts: list[str] = []
     for at in ARTIFACT_CHAIN:
         if at == artifact_type:
             chain_parts.append(f"**{ARTIFACT_DISPLAY_NAMES.get(at, at)}**")
-        elif at == _prev_artifact(artifact_type) and upstream_file:
+        elif at == upstream_type and upstream_file:
             chain_parts.append(f"[[{upstream_file}|{ARTIFACT_DISPLAY_NAMES.get(at, at)}]]")
-        elif at == _next_artifact(artifact_type) and downstream_file:
+        elif at == downstream_type and downstream_file:
             chain_parts.append(f"[[{downstream_file}|{ARTIFACT_DISPLAY_NAMES.get(at, at)}]]")
         else:
-            # Only include if it's between existing chain nodes
             chain_parts.append(ARTIFACT_DISPLAY_NAMES.get(at, at))
 
     chain_line = f"> **Artifact chain:** {' \u2192 '.join(chain_parts)}\n\n"
@@ -369,6 +390,20 @@ def resolve_artifact_path(
     )
 
 
+def _artifact_folder(
+    artifact_type: str, product_slug: str, vault_config: VaultConfig
+) -> Path:
+    """Return the vault folder where a given artifact type is stored.
+
+    Artifacts listed in ``ARTIFACT_SUBFOLDERS`` live under a named subfolder
+    (e.g. design briefs go in ``wireframes/``); everything else lives in
+    the product folder directly.
+    """
+    base = _product_folder(product_slug, vault_config)
+    sub = ARTIFACT_SUBFOLDERS.get(artifact_type)
+    return base / sub if sub else base
+
+
 def _vault_artifact_path(
     artifact_type: str,
     product_slug: str,
@@ -380,7 +415,7 @@ def _vault_artifact_path(
     If version is given, looks for the exact version file.
     Otherwise, finds the latest version file for the artifact type.
     """
-    folder = _product_folder(product_slug, vault_config)
+    folder = _artifact_folder(artifact_type, product_slug, vault_config)
 
     if version:
         return folder / f"{artifact_type}_v{version}.md"
@@ -477,8 +512,8 @@ def write_to_vault(
             downstream_file,
         )
 
-        # Create vault folder
-        folder = _product_folder(product_slug, vault_config)
+        # Create vault folder (respecting per-artifact subfolder rules)
+        folder = _artifact_folder(artifact_type, product_slug, vault_config)
         folder.mkdir(parents=True, exist_ok=True)
 
         # Write the file
@@ -508,7 +543,7 @@ def get_next_version(
     Scans the vault folder for existing version files and returns
     the next minor version. Returns "1.0" if none exist.
     """
-    folder = _product_folder(product_slug, vault_config)
+    folder = _artifact_folder(artifact_type, product_slug, vault_config)
     if not folder.exists():
         return "1.0"
 

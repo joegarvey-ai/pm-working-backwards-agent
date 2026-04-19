@@ -45,6 +45,7 @@ from pm_agent_system.models import (
     VALID_TARGET_TOOLS,
     BRDOutput,
     CodingPromptOutput,
+    DesignBriefOutput,
     PRFAQOutput,
     ResearchOutput,
 )
@@ -54,6 +55,7 @@ from pm_agent_system.utils import (
     formatted_spec_extension,
     render_brd_to_markdown,
     render_build_spec_to_markdown,
+    render_design_brief_to_markdown,
     render_prfaq_to_markdown,
     render_research_to_markdown,
 )
@@ -159,6 +161,7 @@ def validate_publish_destination(destination: str) -> Path | None:
 _PYDANTIC_TO_ARTIFACT: dict[type, str] = {
     ResearchOutput: "research_brief",
     PRFAQOutput: "prfaq",
+    DesignBriefOutput: "design_brief",
     BRDOutput: "brd",
     CodingPromptOutput: "build_spec",
 }
@@ -189,6 +192,73 @@ def _prfaq_version_from_output(obj) -> str:
 
 def _brd_version_from_output(obj) -> str:
     return obj.version_history[-1].version if obj.version_history else "1.0"
+
+
+def _prompt_wireframe_choice(vault_path: str, output_path: str) -> str:
+    """Prompt the PM with the [g]/[b]/[s] wireframe choice.
+
+    Returns one of ``"g"``, ``"b"``, or ``"s"``. Defaults to ``"s"`` in
+    non-interactive contexts (EOFError) so the pipeline can still finish.
+    """
+    print()
+    print("Design brief approved.")
+    print()
+    print("How would you like to proceed with visual wireframes?")
+    print("  [g]  Generate wireframes (coming soon — not yet available)")
+    print("  [b]  Take the design brief to an external tool (Claude Design, Figma, etc.)")
+    print("  [s]  Skip wireframes and continue to BRD")
+    print()
+    while True:
+        try:
+            resp = input("Choice [g/b/s]: ").strip().lower()
+        except EOFError:
+            return "s"
+        if not resp:
+            continue
+        head = resp[0]
+        if head in ("g", "b", "s"):
+            return head
+        print("Please respond with g, b, or s.")
+
+
+def _print_wireframe_response(
+    choice: str, vault_path: str, output_path: str
+) -> None:
+    """Print the user-facing response for the chosen [g/b/s] option."""
+    if choice == "g":
+        print()
+        print("SVG wireframe generation is not yet available. It will be added in a future update.")
+        print()
+        print("In the meantime, you can use the design brief with an external tool:")
+        print("  - Claude Design (claude.ai/design) — paste the brief as your starting prompt")
+        print("  - Figma — use the screen inventory as your artboard list")
+        print("  - A human designer — share the brief as a creative brief")
+        print()
+        print("Design brief location:")
+        if vault_path:
+            print(f"  -> {vault_path}")
+        if output_path:
+            print(f"  -> {output_path}")
+        print()
+        print("Continuing to BRD generation...")
+    elif choice == "b":
+        print()
+        print("Design brief ready for external tools:")
+        if vault_path:
+            print(f"  -> {vault_path}")
+        if output_path:
+            print(f"  -> {output_path}")
+        print()
+        print("You can use it with:")
+        print("  - Claude Design (claude.ai/design) — paste the brief as your starting prompt")
+        print("  - Figma — use the screen inventory as your artboard list")
+        print("  - A human designer — share the brief as a creative brief")
+        print()
+        print("Continuing to BRD generation...")
+    else:
+        # [s] — no extra messaging; the pipeline simply continues
+        print()
+        print("Skipping wireframes; continuing to BRD generation without a design brief reference.")
 
 
 # ---------- File output helpers ----------
@@ -287,6 +357,16 @@ def publish_output(source_file: Path, destination_dir: Path, label: str) -> Path
     return dest_path
 
 
+def save_design_brief(markdown: str, label: str, version: str = "1.0") -> Path:
+    """Write a design brief markdown file to OUTPUT_DIR."""
+    slug = _slugify(label) or "design_brief"
+    path = _output_dir() / f"design_brief_{slug}_v{version}.md"
+    path.write_text(markdown, encoding="utf-8")
+    html_path = path.with_suffix(".html")
+    html_path.write_text(markdown_to_html(markdown, title="Design Brief"), encoding="utf-8")
+    return path
+
+
 def save_brd(markdown: str, label: str, version: str) -> Path:
     slug = _slugify(label) or "brd"
     path = _output_dir() / f"brd_{slug}_v{version}.md"
@@ -294,6 +374,29 @@ def save_brd(markdown: str, label: str, version: str) -> Path:
     html_path = path.with_suffix(".html")
     html_path.write_text(markdown_to_html(markdown, title="Business Requirements Document"), encoding="utf-8")
     return path
+
+
+def resolve_visual_style_guide_path(inputs: dict) -> str:
+    """Return the visual style guide path to pass into crew inputs.
+
+    Priority: input brief's ``visual_style_guide_path`` → env var
+    ``VISUAL_STYLE_GUIDE_PATH`` → empty string. If the resolved path is
+    set but the file does not exist, log a warning and return empty so
+    Agent 3 falls back to defaults without crashing.
+    """
+    raw = (inputs.get("visual_style_guide_path") or "").strip()
+    if not raw:
+        raw = os.getenv("VISUAL_STYLE_GUIDE_PATH", "").strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.exists():
+        logger.warning("Visual style guide path %s does not exist; proceeding without it.", path)
+        print(f"Note: visual style guide not found at {path}; Agent 3 will use defaults.")
+        return ""
+    return str(path)
 
 
 def save_build_spec(reference_md: str, formatted: str, label: str, target_tool: str) -> tuple[Path, Path]:
@@ -688,6 +791,7 @@ def _extract_agent_usage(result) -> dict[str, dict[str, int]]:
     agent_map = {
         "ResearchOutput": "Research Agent",
         "PRFAQOutput": "PRFAQ Agent",
+        "DesignBriefOutput": "Design Brief Agent",
         "BRDOutput": "BRD Agent",
         "CodingPromptOutput": "BRD Agent",  # build spec runs on the same agent
     }
@@ -740,6 +844,7 @@ def _print_cost_summary(result, checkpoint, output_dir):
         artifact_key = {
             "Research Agent": "research_brief",
             "PRFAQ Agent": "prfaq",
+            "Design Brief Agent": "design_brief",
             "BRD Agent": "brd",
         }.get(agent_name)
         if artifact_key and artifact_key in checkpoint.get("artifacts", {}):
@@ -796,7 +901,13 @@ def _record_artifact_from_task_output(
             path = save_prfaq(md, label, version)
             if vault_config and product_slug:
                 write_to_vault(md, "prfaq", product_slug, version, vault_config,
-                               upstream="research_brief", downstream="brd")
+                               upstream="research_brief", downstream="design_brief")
+        elif isinstance(obj, DesignBriefOutput):
+            md = render_design_brief_to_markdown(obj, slug=slug)
+            path = save_design_brief(md, label, "1.0")
+            if vault_config and product_slug:
+                write_to_vault(md, "design_brief", product_slug, "1.0", vault_config,
+                               upstream="prfaq", downstream="brd")
         elif isinstance(obj, BRDOutput):
             version = _brd_version_from_output(obj)
             md = render_brd_to_markdown(obj, slug=slug)
@@ -864,11 +975,13 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     print(f"Resuming. Already completed: {', '.join(sorted(done))}")
 
     # Determine what to run
+    skip_design = bool(getattr(args, "skip_design", False))
     need_research = "research_brief" not in done
     need_prfaq = "prfaq" not in done
+    need_design = (not skip_design) and "design_brief" not in done
     need_brd = "brd" not in done
 
-    if not need_research and not need_prfaq and not need_brd:
+    if not need_research and not need_prfaq and not need_design and not need_brd:
         print("All artifacts already present from a prior run. Nothing to do.")
         print("Use --fresh to force a full re-run.")
         delete_checkpoint(output_dir)
@@ -888,14 +1001,38 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     crew_inputs.update({
         "prfaq_path": "",
         "research_path": "",
+        "design_brief_path": "",
+        "visual_style_guide_path": resolve_visual_style_guide_path(inputs),
         "requirements_path": requirements_path_arg,
         "brd_path": "",
         "target_tool": target_tool,
     })
     skip = getattr(args, "skip_validation", False)
 
+    # Holds the PM's [g/b/s] choice after design-brief approval so we can
+    # optionally clear design_brief_path before the BRD task interpolates
+    # its prompt.
+    wireframe_choice: dict[str, str] = {"value": ""}
+
+    def _on_approve_design_brief(new_vault_path: str) -> None:
+        record = provider.artifacts.get("design_brief")
+        out_path = str(record.output_path) if record else ""
+        choice = _prompt_wireframe_choice(new_vault_path, out_path)
+        wireframe_choice["value"] = choice
+        _print_wireframe_response(choice, new_vault_path, out_path)
+        if choice == "s":
+            # BRD must not reference design brief — clear the path so the
+            # conditional block in the BRD task skips it. The chained crew
+            # still passes the DesignBriefOutput via context, so the agent
+            # will see it, but the task prompt explicitly skips screen-ref
+            # instructions when design_brief_path is empty.
+            crew_inputs["design_brief_path"] = ""
+
     # Build the full registry — only the handlers for tasks that will actually run
     # are needed, but registering all four is harmless (unused classes never match).
+    prfaq_downstream = "brd" if skip_design else "design_brief"
+    brd_upstream = "prfaq" if skip_design else "design_brief"
+
     handlers = [
         ArtifactHandler(
             artifact_type="research_brief",
@@ -914,8 +1051,25 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             ),
             version=_prfaq_version_from_output,
             upstream="research_brief",
-            downstream="brd",
+            downstream=prfaq_downstream,
         ),
+    ]
+
+    if not skip_design:
+        handlers.append(
+            ArtifactHandler(
+                artifact_type="design_brief",
+                pydantic_class=DesignBriefOutput,
+                render_fn=lambda obj: render_design_brief_to_markdown(obj, slug=slug),
+                save_output_fn=lambda md, _obj: save_design_brief(md, label, "1.0"),
+                version="1.0",
+                upstream="prfaq",
+                downstream="brd",
+                post_approve=_on_approve_design_brief,
+            )
+        )
+
+    handlers.extend([
         ArtifactHandler(
             artifact_type="brd",
             pydantic_class=BRDOutput,
@@ -924,7 +1078,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                 md, label, obj.version_history[-1].version if obj.version_history else "1.0"
             ),
             version=_brd_version_from_output,
-            upstream="prfaq",
+            upstream=brd_upstream,
             downstream="build_spec",
         ),
         ArtifactHandler(
@@ -935,20 +1089,29 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             version="1.0",
             upstream="brd",
         ),
-    ]
+    ])
     provider, token = _install_checkpoint_provider(
         handlers=handlers, vault_cfg=vault_cfg, product_slug=product_slug,
     )
 
+    # Pre-compute the expected design brief path so the BRD task can read it
+    # when design_brief_path interpolation happens. If the PM picks [s] at the
+    # post-approve prompt, we clear this before the BRD task runs.
+    if not skip_design:
+        crew_inputs["design_brief_path"] = str(
+            _output_dir() / f"design_brief_{slug}_v1.0.md"
+        )
+
     # --- Resume path: only Agent 4 (BRD + build spec) ---
     try:
-        if not need_research and not need_prfaq and need_brd:
+        if not need_research and not need_prfaq and not need_design and need_brd:
             print(f"\nResuming Agent 4 (BRD + build spec) for: {label[:80]}...")
 
-            # Find the PRFAQ and research paths from the checkpoint
+            # Find the PRFAQ, research, and (optional) design brief paths from the checkpoint
             existing_ckpt = load_checkpoint(output_dir) or {}
             prfaq_file = existing_ckpt.get("artifacts", {}).get("prfaq", {}).get("path", "")
             research_file = existing_ckpt.get("artifacts", {}).get("research_brief", {}).get("path", "")
+            design_file = existing_ckpt.get("artifacts", {}).get("design_brief", {}).get("path", "")
             # Vault read resolution: prefer vault copies if PM edited them
             if vault_cfg and product_slug:
                 try:
@@ -959,8 +1122,16 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     research_file = resolve_artifact_path("research_brief", product_slug, vault_cfg, research_file)
                 except FileNotFoundError:
                     pass
+                if design_file:
+                    try:
+                        design_file = resolve_artifact_path(
+                            "design_brief", product_slug, vault_cfg, design_file
+                        )
+                    except FileNotFoundError:
+                        pass
             crew_inputs["prfaq_path"] = prfaq_file
             crew_inputs["research_path"] = research_file
+            crew_inputs["design_brief_path"] = design_file
 
             def _resume_task_callback(task_output):
                 _record_artifact_from_task_output(
@@ -996,7 +1167,9 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                 )
 
             try:
-                crew = PmAgentSystem().full_pipeline_crew(skip_validation=skip)
+                crew = PmAgentSystem().full_pipeline_crew(
+                    skip_validation=skip, skip_design=skip_design
+                )
                 crew.task_callback = _task_callback
                 result = crew.kickoff(inputs=crew_inputs)
             except Exception as e:
@@ -1079,6 +1252,25 @@ def cmd_brd(args: argparse.Namespace) -> None:
             sys.exit(1)
         research_path_arg = str(rp)
 
+    # Resolve the design brief path: explicit --design-brief-path wins;
+    # otherwise look for a latest vault copy; empty string means "no brief".
+    design_brief_path_arg = ""
+    if getattr(args, "design_brief_path", None):
+        dp = Path(args.design_brief_path).expanduser().resolve()
+        if not dp.exists():
+            print(f"Error: Design brief file not found: {dp}")
+            sys.exit(1)
+        design_brief_path_arg = str(dp)
+    elif vault_cfg and product_slug:
+        try:
+            resolved = resolve_artifact_path(
+                "design_brief", product_slug, vault_cfg, ""
+            )
+            if resolved:
+                design_brief_path_arg = resolved
+        except FileNotFoundError:
+            design_brief_path_arg = ""
+
     requirements_path_arg = ""
     if args.requirements_path:
         reqp = Path(args.requirements_path).expanduser().resolve()
@@ -1096,18 +1288,23 @@ def cmd_brd(args: argparse.Namespace) -> None:
     crew_inputs.update({
         "prfaq_path": str(prfaq_path),
         "research_path": research_path_arg,
+        "design_brief_path": design_brief_path_arg,
         "requirements_path": requirements_path_arg,
         "brd_path": "",
         "target_tool": target_tool,
     })
 
     print(f"\nGenerating BRD + build spec from PRFAQ: {prfaq_path.name}")
+    if design_brief_path_arg:
+        print(f"Design brief:          {Path(design_brief_path_arg).name}")
     if requirements_path_arg:
         print(f"Customer requirements: {Path(requirements_path_arg).name}")
     print(f"Target tool: {target_tool}\n")
 
     label = inputs["feature_summary"]
     slug = _slugify(label)
+
+    brd_upstream = "design_brief" if design_brief_path_arg else "prfaq"
 
     provider, token = _install_checkpoint_provider(
         handlers=[
@@ -1119,7 +1316,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
                     md, label, obj.version_history[-1].version if obj.version_history else "1.0",
                 ),
                 version=_brd_version_from_output,
-                upstream="prfaq",
+                upstream=brd_upstream,
                 downstream="build_spec",
             ),
             ArtifactHandler(
@@ -1406,6 +1603,219 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
         generate_index_note(product_slug, vault_cfg_for_provider)
 
 
+# ---------- Subcommand: wireframes (Agent 3 standalone) ----------
+
+
+def cmd_wireframes(args: argparse.Namespace) -> None:
+    """Run Agent 3 only — generate a design brief from an approved PRFAQ on disk."""
+    inputs = validate_input(parse_input(args.input_file))
+
+    prfaq_path = Path(args.prfaq_path).expanduser().resolve()
+    if not prfaq_path.exists():
+        print(f"Error: PRFAQ file not found: {prfaq_path}")
+        sys.exit(1)
+
+    vault_cfg, product_slug = _vault_for_inputs(inputs)
+    if vault_cfg and product_slug:
+        try:
+            prfaq_path = Path(resolve_artifact_path("prfaq", product_slug, vault_cfg, str(prfaq_path)))
+        except FileNotFoundError:
+            pass
+
+    research_path_arg = ""
+    if args.research_path:
+        rp = Path(args.research_path).expanduser().resolve()
+        if not rp.exists():
+            print(f"Error: Research file not found: {rp}")
+            sys.exit(1)
+        research_path_arg = str(rp)
+
+    label = inputs["feature_summary"]
+    slug = _slugify(label)
+
+    crew_inputs = {k: v for k, v in inputs.items() if k != "publish_destination"}
+    crew_inputs.update({
+        "prfaq_path": str(prfaq_path),
+        "research_path": research_path_arg,
+        "design_brief_path": "",
+        "visual_style_guide_path": resolve_visual_style_guide_path(inputs),
+    })
+
+    print(f"\nGenerating design brief from PRFAQ: {prfaq_path.name}")
+    if crew_inputs["visual_style_guide_path"]:
+        print(f"Visual style guide: {Path(crew_inputs['visual_style_guide_path']).name}")
+    print()
+
+    def _on_approve(new_vault_path: str) -> None:
+        record = provider.artifacts.get("design_brief")
+        out_path = str(record.output_path) if record else ""
+        choice = _prompt_wireframe_choice(new_vault_path, out_path)
+        _print_wireframe_response(choice, new_vault_path, out_path)
+
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="design_brief",
+                pydantic_class=DesignBriefOutput,
+                render_fn=lambda obj: render_design_brief_to_markdown(obj, slug=slug),
+                save_output_fn=lambda md, _obj: save_design_brief(md, label, "1.0"),
+                version="1.0",
+                upstream="prfaq",
+                downstream="brd",
+                post_approve=_on_approve,
+            ),
+        ],
+        vault_cfg=vault_cfg,
+        product_slug=product_slug,
+    )
+
+    try:
+        try:
+            result = PmAgentSystem().design_brief_crew().kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
+
+    brief = extract_pydantic_output(result, DesignBriefOutput)
+    if brief is None:
+        print("\nError: Agent 3 did not return a valid DesignBriefOutput.")
+        print("Raw output:", result)
+        sys.exit(1)
+
+    record = provider.artifacts.get("design_brief")
+    if record is None:
+        markdown = render_design_brief_to_markdown(brief, slug=slug)
+        working_copy = save_design_brief(markdown, label, "1.0")
+        if vault_cfg and product_slug:
+            write_to_vault(markdown, "design_brief", product_slug, "1.0", vault_cfg,
+                           upstream="prfaq", downstream="brd")
+    else:
+        working_copy = record.output_path
+    print(f"\nDesign brief saved to: {working_copy}")
+
+    if vault_cfg and product_slug:
+        copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
+        generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
+
+
+# ---------- Subcommand: revise-wireframes (Agent 3 Mode 2) ----------
+
+
+def cmd_revise_wireframes(args: argparse.Namespace) -> None:
+    """Run Agent 3 only — revise an existing design brief with PM feedback.
+
+    In this scaffolding pass, revision applies to the design brief
+    document only; SVG wireframe regeneration lands in a follow-up
+    prompt.
+    """
+    if not args.context_path and not args.context_text:
+        print("Error: revise-wireframes requires at least one of --context-path or --context-text.")
+        sys.exit(1)
+
+    design_path = Path(args.design_brief_path).expanduser().resolve()
+    if not design_path.exists() or not design_path.is_file():
+        print(f"Error: Design brief file not found: {design_path}")
+        sys.exit(1)
+
+    # Vault read resolution: prefer vault copy if PM edited it there
+    vault_cfg = get_vault_config()
+    if vault_cfg:
+        fm_pre = read_frontmatter(design_path)
+        slug = fm_pre.get("product_slug") or re.sub(
+            r"_v\d+\.\d+$", "", design_path.stem.replace("design_brief_", "")
+        )
+        vault_cfg.initiative = fm_pre.get("initiative", "")
+        try:
+            design_path = Path(
+                resolve_artifact_path("design_brief", slug, vault_cfg, str(design_path))
+            )
+        except FileNotFoundError:
+            pass
+
+    context_path_str = ""
+    if args.context_path:
+        cp = Path(args.context_path).expanduser().resolve()
+        if not cp.exists():
+            print(f"Error: Context path not found: {cp}")
+            sys.exit(1)
+        context_path_str = str(cp)
+
+    crew_inputs = {
+        "design_brief_path": str(design_path),
+        "context_path": context_path_str,
+        "context_text": args.context_text or "",
+    }
+
+    print(f"\nRevising design brief: {design_path.name}\n")
+
+    fm = read_frontmatter(design_path)
+    label = fm.get("slug") or re.sub(
+        r"_v\d+\.\d+$", "", design_path.stem.replace("design_brief_", "")
+    )
+    product_slug = fm.get("product_slug") or label.lower().replace("_", "-")
+
+    vault_cfg_for_provider = get_vault_config()
+    if vault_cfg_for_provider:
+        vault_cfg_for_provider.initiative = fm.get("initiative", "")
+
+    old_vault_file = ""
+    if vault_cfg_for_provider:
+        candidate = Path(str(design_path))
+        if candidate.exists() and "PM Agent" in str(candidate):
+            old_vault_file = str(candidate)
+
+    def _on_approve(new_vault_path: str) -> None:
+        if old_vault_file and old_vault_file != new_vault_path and Path(old_vault_file).exists():
+            mark_superseded(old_vault_file, Path(new_vault_path).stem)
+
+    provider, token = _install_checkpoint_provider(
+        handlers=[
+            ArtifactHandler(
+                artifact_type="design_brief",
+                pydantic_class=DesignBriefOutput,
+                render_fn=lambda obj: render_design_brief_to_markdown(obj, slug=label),
+                save_output_fn=lambda md, _obj: save_design_brief(md, label, "1.0"),
+                version="1.0",
+                upstream="prfaq",
+                downstream="brd",
+                post_approve=_on_approve,
+            ),
+        ],
+        vault_cfg=vault_cfg_for_provider,
+        product_slug=product_slug,
+    )
+
+    try:
+        try:
+            result = PmAgentSystem().revise_design_brief_crew().kickoff(inputs=crew_inputs)
+        except Exception as e:
+            print(f"\nError running crew: {e}")
+            sys.exit(1)
+    finally:
+        reset_provider(token)
+
+    brief = extract_pydantic_output(result, DesignBriefOutput)
+    if brief is None:
+        print("\nError: Agent 3 did not return a valid DesignBriefOutput.")
+        sys.exit(1)
+
+    record = provider.artifacts.get("design_brief")
+    if record is None:
+        markdown = render_design_brief_to_markdown(brief, slug=label)
+        working_copy = save_design_brief(markdown, label, "1.0")
+        if vault_cfg_for_provider:
+            write_revision_to_vault(markdown, "design_brief", product_slug, vault_cfg_for_provider,
+                                    upstream="prfaq", downstream="brd")
+    else:
+        working_copy = record.output_path
+    print(f"\nRevision complete. Working copy saved to: {working_copy}")
+
+    if vault_cfg_for_provider:
+        generate_index_note(product_slug, vault_cfg_for_provider)
+
+
 # ---------- Subcommand: diff ----------
 
 
@@ -1543,7 +1953,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_full = sub.add_parser(
         "full-pipeline",
-        help="Run all three agents end-to-end (research → PRFAQ → BRD → build spec)",
+        help="Run all agents end-to-end (research → PRFAQ → design brief → BRD → build spec)",
     )
     p_full.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
     p_full.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
@@ -1566,6 +1976,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete any existing checkpoint and run everything from scratch",
     )
+    p_full.add_argument(
+        "--skip-design",
+        action="store_true",
+        help="Skip Agent 3 (design brief) and run the three-agent pipeline as before",
+    )
     p_full.add_argument("--open", action="store_true", help="Open the final HTML artifact in the default browser when done")
     p_full.set_defaults(func=cmd_full_pipeline)
 
@@ -1576,6 +1991,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_brd.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
     p_brd.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
     p_brd.add_argument("--research-path", help="Optional path to research brief markdown")
+    p_brd.add_argument(
+        "--design-brief-path",
+        help="Optional path to approved design brief markdown (Agent 3 output)",
+    )
     p_brd.add_argument(
         "--requirements-path",
         help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
@@ -1600,6 +2019,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rbrd.add_argument("--context-path", help="File or folder with revision context")
     p_rbrd.add_argument("--context-text", help="Inline revision instructions")
     p_rbrd.set_defaults(func=cmd_revise_brd)
+
+    # ----- Agent 3 commands -----
+
+    p_wire = sub.add_parser(
+        "wireframes",
+        help="Run Agent 3 only — generate a design brief from an approved PRFAQ",
+    )
+    p_wire.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
+    p_wire.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
+    p_wire.add_argument("--research-path", help="Optional path to research brief markdown")
+    p_wire.set_defaults(func=cmd_wireframes)
+
+    p_rwire = sub.add_parser(
+        "revise-wireframes",
+        help="Run Agent 3 only — revise an existing design brief",
+    )
+    p_rwire.add_argument("--design-brief-path", required=True, help="Path to current design brief markdown")
+    p_rwire.add_argument("--context-path", help="File or folder with revision context")
+    p_rwire.add_argument("--context-text", help="Inline revision instructions")
+    p_rwire.set_defaults(func=cmd_revise_wireframes)
 
     p_clean = sub.add_parser("clean", help="Manage output retention (archive/list/delete)")
     p_clean.add_argument("--archive", action="store_true", help="Archive files older than retention window")

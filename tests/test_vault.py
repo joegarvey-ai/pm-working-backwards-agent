@@ -307,16 +307,18 @@ def test_generate_index_note(tmp_path):
 
 
 def test_full_pipeline_writes_to_vault(tmp_path):
-    """Set vault to a temp dir, write all four artifacts, verify structure."""
+    """Set vault to a temp dir, write all five artifacts, verify structure."""
     cfg = VaultConfig(vault_path=str(tmp_path), folder_prefix="PM Agent")
     slug = "test-product"
 
     write_to_vault("# Research\n\nBrief.", "research_brief", slug, "1.0", cfg,
                    downstream="prfaq")
     write_to_vault("# PRFAQ\n\nContent.", "prfaq", slug, "1.0", cfg,
-                   upstream="research_brief", downstream="brd")
+                   upstream="research_brief", downstream="design_brief")
+    write_to_vault("# Design Brief\n\nScreens.", "design_brief", slug, "1.0", cfg,
+                   upstream="prfaq", downstream="brd")
     write_to_vault("# BRD\n\nRequirements.", "brd", slug, "1.0", cfg,
-                   upstream="prfaq", downstream="build_spec")
+                   upstream="design_brief", downstream="build_spec")
     write_to_vault("# Build Spec\n\nSpec.", "build_spec", slug, "1.0", cfg,
                    upstream="brd")
 
@@ -325,14 +327,16 @@ def test_full_pipeline_writes_to_vault(tmp_path):
     folder = tmp_path / "PM Agent" / slug
     assert (folder / "research_brief_v1.0.md").exists()
     assert (folder / "prfaq_v1.0.md").exists()
+    assert (folder / "wireframes" / "design_brief_v1.0.md").exists()
     assert (folder / "brd_v1.0.md").exists()
     assert (folder / "build_spec_v1.0.md").exists()
     assert (folder / "_index.md").exists()
 
-    # Verify _index.md lists all four artifacts
+    # Verify _index.md lists all five artifacts
     index_content = (folder / "_index.md").read_text(encoding="utf-8")
     assert "[[research_brief_v1.0]]" in index_content
     assert "[[prfaq_v1.0]]" in index_content
+    assert "[[design_brief_v1.0]]" in index_content
     assert "[[brd_v1.0]]" in index_content
     assert "[[build_spec_v1.0]]" in index_content
     assert "not yet generated" not in index_content
