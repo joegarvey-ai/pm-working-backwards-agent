@@ -15,6 +15,7 @@ from pm_agent_system.vault import (
     detect_divergence,
     generate_all_products_note,
     generate_index_note,
+    get_initiative,
     get_next_version,
     get_product_slug,
     get_vault_config,
@@ -468,3 +469,27 @@ def test_resolve_artifact_path_vault_missing_file(tmp_path):
 
     result = resolve_artifact_path("prfaq", "test", cfg, str(output_file))
     assert result == str(output_file)
+
+
+# ---------- Null-field tolerance (follow-up to 91fcd27) ----------
+
+
+def test_get_product_slug_tolerates_none_product_name():
+    """``product_name: None`` must behave like a missing key, not crash on .strip()."""
+    missing = get_product_slug({"feature_summary": "Cool feature"})
+    null = get_product_slug({"product_name": None, "feature_summary": "Cool feature"})
+    assert null == missing
+
+
+def test_get_product_slug_tolerates_none_feature_summary():
+    """Null ``feature_summary`` fallback must not crash on .lower(); falls back to 'unknown'."""
+    # Exercises the second leg of the `x or y` chain in get_product_slug.
+    result = get_product_slug({"product_name": None, "feature_summary": None})
+    assert result == "unknown"
+
+
+def test_get_initiative_tolerates_none_initiative():
+    """``initiative: None`` must return the empty-string sentinel, not crash on .strip()."""
+    missing = get_initiative({})
+    null = get_initiative({"initiative": None})
+    assert null == missing == ""

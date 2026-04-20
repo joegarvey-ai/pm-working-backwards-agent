@@ -442,8 +442,8 @@ def get_product_slug(input_config: dict) -> str:
     characters removed.
     """
     name = (
-        input_config.get("product_name", "").strip()
-        or input_config.get("feature_summary", "unknown")
+        (input_config.get("product_name") or "").strip()
+        or (input_config.get("feature_summary") or "unknown")
     )
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
@@ -458,7 +458,7 @@ def get_initiative(input_config: dict) -> str:
     Returns an empty string if not set — callers use this to decide
     whether to add a nesting level.
     """
-    raw = input_config.get("initiative", "").strip()
+    raw = (input_config.get("initiative") or "").strip()
     if not raw:
         return ""
     slug = raw.lower().strip()
