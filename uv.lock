@@ -1985,6 +1985,11 @@ ui = [
     { name = "textual-serve" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.35.0" },
@@ -2002,6 +2007,9 @@ requires-dist = [
     { name = "textual-serve", marker = "extra == 'ui'", specifier = ">=1.1.0" },
 ]
 provides-extras = ["test", "ui"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "portalocker"

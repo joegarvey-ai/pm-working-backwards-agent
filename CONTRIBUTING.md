@@ -18,6 +18,18 @@ Thanks for considering a contribution. This project is small and welcomes help f
 4. If you changed code, run the smoke test (`uv run pm_agent_system research examples/input-brief-example.md`) to confirm nothing broke.
 5. Open a PR with a short description of what you changed and why.
 
+## Running tests
+
+Install dev dependencies (one-time per environment) and run the suite:
+
+```bash
+uv sync --group dev
+uv run pytest
+```
+
+The `dev` dependency group includes pytest. Older checkouts may still install
+the legacy `test` extra (`uv pip install -e ".[test]"`); both paths work.
+
 ## Code style
 
 Match what's already there. We use standard Python formatting (`ruff` if you have it installed). No hard rules beyond that.

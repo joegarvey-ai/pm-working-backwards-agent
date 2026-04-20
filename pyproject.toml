@@ -28,6 +28,13 @@ test = "pm_agent_system.main:test"
 test = ["pytest>=8.0"]
 ui = ["textual>=1.0.0", "textual-serve>=1.1.0"]
 
+[dependency-groups]
+# Installed by `uv sync --group dev` (or `uv sync` if uv resolves the
+# dev group by default on your version). The legacy `test` optional
+# extra above is kept for backward compatibility with anyone still
+# running `uv pip install -e ".[test]"`.
+dev = ["pytest>=8.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
