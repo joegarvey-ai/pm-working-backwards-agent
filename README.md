@@ -95,6 +95,8 @@ uv run pm_agent_system full-pipeline examples/input-brief-example.md
 
 The first run takes 5-10 minutes and produces files in `./output/`. See [examples/](examples/) for what those files look like.
 
+If you want to run the test suite locally, also run `uv sync --group dev` — this installs pytest and any other dev-only dependencies. See [CONTRIBUTING.md](CONTRIBUTING.md#running-tests) for the full test workflow.
+
 The `examples/` directory contains sample input files (markdown and YAML), standalone-mode examples, and templates (style guide, customer requirements formats in `examples/templates/`). The `input/` directory is where you put your own input files — see [input/README.md](input/README.md).
 
 For a step-by-step setup walkthrough written for non-technical users, read [SETUP.md](SETUP.md).

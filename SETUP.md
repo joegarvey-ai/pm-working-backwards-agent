@@ -181,6 +181,19 @@ uv run pm_agent_system full-pipeline my_input.md
 
 If you prefer YAML over markdown (developers, CI/CD), the same commands accept `.yaml` files. See `examples/input.yaml` for the YAML format.
 
+## Optional: Running tests
+
+You can skip this section if you're only planning to use the pipeline, not modify it.
+
+If you want to verify your setup by running the project's automated tests, run `uv sync --group dev` after the initial install to pull in pytest. Then run `uv run pytest` — all tests should pass:
+
+```bash
+uv sync --group dev
+uv run pytest
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#running-tests) if you plan to submit changes.
+
 ## Troubleshooting
 
 **"command not found: uv"** — close and reopen your terminal. If it still doesn't work, run `source ~/.bashrc` or `source ~/.zshrc`.
