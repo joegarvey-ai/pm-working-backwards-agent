@@ -63,13 +63,23 @@ DOVETAIL_MCP_BASE = os.getenv("DOVETAIL_MCP_BASE_URL", "https://dovetail.com/api
 
 
 class DovetailSearchInput(BaseModel):
-    """Input schema for DovetailSearchTool."""
+    """Input schema for DovetailSearchTool.
+
+    NOTE: 'query' is required even though technically only search and
+    deep_search use it. Making it required ensures the LLM always passes
+    a value when Bedrock serializes the tool schema. For ID-based actions
+    (insight_content, data_content, highlights) pass a short descriptive
+    phrase as the query; it will be ignored by those actions but still
+    satisfies the schema requirement.
+    """
 
     query: str = Field(
-        default="",
+        ...,
         description=(
-            "Free-text search query. Used by 'search' and 'deep_search'. "
-            "Ignored by other actions."
+            "Required free-text query describing what you are looking for. "
+            "For action='search' or 'deep_search' this is the search term. "
+            "For ID-based actions it is just a description of what you are "
+            "fetching (the action will use the ID field, not the query)."
         ),
     )
     action: str = Field(
