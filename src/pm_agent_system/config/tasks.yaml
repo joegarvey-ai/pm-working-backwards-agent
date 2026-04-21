@@ -34,6 +34,196 @@ validate_input:
   agent: research_agent
   human_input: true
 
+# ---------- Split research tasks (Stage 2 architecture) ----------
+# These three tasks replace the monolithic research_task when using
+# the split research crew. Each task has a focused tool set and a
+# smaller output schema, preventing tool-skipping under load.
+
+external_research_task:
+  description: >
+    You are gathering external market data for a PM's product research
+    request. Focus ONLY on public market data and competitive analysis.
+    Do NOT use the Dovetail tool. Do NOT synthesize or write strategic
+    implications. Just gather external evidence.
+
+    ## PM Input
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Goals:** {goals}
+
+    **User Summary:** {user_summary}
+
+    **Known Constraints:** {known_constraints}
+
+    ## Your Job
+
+    1. **Market sizing.** Use the Tavily search tool to find real market
+       sizing data with named sources and numbers. If data is unavailable,
+       note it in external_gaps.
+
+    2. **Competitive landscape.** Use Tavily to identify 3-5 competitors
+       or comparable products. For each, use the competitive_intelligence
+       tool to look up G2, Capterra, and TrustRadius review data. Include
+       ratings, review counts, top pros, top cons, common reviewer roles,
+       and pricing if available.
+
+    3. **Return as ExternalResearchOutput JSON.** Include all sources in
+       external_sources. Note any gaps in external_gaps.
+
+    ## Rules
+
+    - Every claim needs a real number AND a source.
+    - Never fabricate statistics, URLs, or competitor names.
+    - If fewer than 3 competitors found, report what you found and note
+      the gap. Do not invent competitors.
+    - No banned words: robust, comprehensive, powerful, cutting-edge,
+      transformative, game-changing, revolutionary, best-in-class,
+      seamless, incredibly, significantly, essentially, very, really,
+      quite, extremely, strong, leverage, synergies, drive alignment,
+      holistic, unlock, supercharge.
+
+  expected_output: >
+    An ExternalResearchOutput JSON object with market_sizing populated
+    from real sources, competitors list with 3-5 entries including review
+    data, external_sources listing all URLs cited, and external_gaps
+    noting any topics where data was unavailable.
+
+  agent: research_agent
+  human_input: false
+
+customer_evidence_task:
+  description: >
+    You are gathering internal customer research data from the Dovetail
+    workspace. Focus ONLY on Dovetail. Do NOT use Tavily or competitive
+    intelligence tools. Do NOT synthesize findings.
+
+    ## PM Input
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Goals:** {goals}
+
+    **User Summary:** {user_summary}
+
+    ## Your Job
+
+    1. **Search Dovetail.** Call the dovetail_research tool with
+       action='deep_search' and a keyword query related to the problem
+       space (e.g., the core topic from feature_summary). This will
+       search the workspace, find relevant projects, and fetch full
+       insight content including direct customer quotes.
+
+    2. **Run at least two deep_search calls** with different queries.
+       For example, one for the core problem domain and one for the
+       user persona or a specific pain point.
+
+    3. **Extract quotes.** From the returned insight content, pull out
+       direct customer quotes with attribution. Include the insight
+       title and project name as the source.
+
+    4. **Return as CustomerEvidenceOutput JSON.** If Dovetail returns
+       no relevant content, populate dovetail_gaps with what was
+       searched and what was missing. Do not fabricate quotes.
+
+    ## Rules
+
+    - Only use the dovetail_research tool. No other tools.
+    - Direct quotes go in quotation marks with source attribution.
+    - Never fabricate interview quotes or customer data.
+    - If Dovetail returns nothing useful, say so in dovetail_gaps.
+
+  expected_output: >
+    A CustomerEvidenceOutput JSON object with customer_evidence
+    populated from real Dovetail insight content (direct quotes with
+    source and theme), dovetail_sources listing the projects and
+    insights referenced, and dovetail_gaps noting any topics where
+    Dovetail had no relevant content.
+
+  agent: research_agent
+  human_input: false
+
+research_synthesis_task:
+  description: >
+    You have two completed research outputs from prior tasks:
+    1. ExternalResearchOutput (market sizing + competitive landscape)
+    2. CustomerEvidenceOutput (Dovetail customer quotes)
+
+    Your job is to merge these into a single ResearchOutput that the
+    PRFAQ agent can consume. You have NO tools. Do not search for
+    anything new. Work only from the data in the prior task outputs
+    and the PM's input below.
+
+    ## PM Input
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Goals:** {goals}
+
+    **Timing:** {timing}
+
+    **User Summary:** {user_summary}
+
+    **Success Metrics:** {success_metrics}
+
+    **Known Constraints:** {known_constraints}
+
+    **Internal Context:** {internal_context}
+
+    **Business Context:** {business_context}
+
+    ## Your Job
+
+    1. **Context.** Write 1-3 sentences restating the problem from the
+       PM's input. No citations needed.
+
+    2. **Executive summary.** Summarize the top findings from both the
+       external research and customer evidence. Reference business
+       context metrics if provided.
+
+    3. **Market sizing.** Copy directly from ExternalResearchOutput.
+
+    4. **Competitors.** Copy directly from ExternalResearchOutput.
+
+    5. **Customer evidence.** Copy directly from CustomerEvidenceOutput.
+
+    6. **Pain points.** Derive from both external and customer evidence.
+       Rank by severity. Cite sources.
+
+    7. **Internal state assessment.** If internal_context was provided,
+       summarize it. If not, note it was not provided.
+
+    8. **Strategic implications.** Factual summary of what the combined
+       data suggests. No recommendations. Tie each implication to a
+       cited finding.
+
+    9. **Gaps and limitations.** Merge external_gaps and dovetail_gaps
+       from the prior outputs. Add any additional gaps you notice.
+
+    10. **Sources.** Merge external_sources and dovetail_sources.
+
+    11. **Return as ResearchOutput JSON.**
+
+    ## Rules
+
+    - Do NOT call any tools. You have none.
+    - Do NOT invent data. Only use what the prior tasks produced.
+    - Preserve inline citations from the prior outputs.
+    - No banned words (same list as other tasks).
+    - If business_context was provided, reference it in the executive
+      summary and strategic implications.
+
+  expected_output: >
+    A ResearchOutput JSON object with all fields populated by merging
+    the ExternalResearchOutput and CustomerEvidenceOutput from prior
+    tasks, plus PM input for context, internal state, and business
+    context sections.
+
+  agent: research_agent
+  human_input: true
+
+# ---------- Original monolithic research task (kept as fallback) ----------
+
 research_task:
   description: >
     You have been given a product research request from a PM. Your job is to

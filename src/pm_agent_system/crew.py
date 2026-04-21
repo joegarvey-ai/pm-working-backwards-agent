@@ -4,7 +4,9 @@ from crewai.project import CrewBase, agent, crew, task
 from pm_agent_system.models import (
     BRDOutput,
     CodingPromptOutput,
+    CustomerEvidenceOutput,
     DesignBriefOutput,
+    ExternalResearchOutput,
     PRFAQOutput,
     ResearchOutput,
 )
@@ -241,16 +243,41 @@ class PmAgentSystem:
     # ---------- Crews ----------
 
     def _research_tasks(self, skip_validation: bool = False) -> list[Task]:
-        """Build the research task list, optionally prepending validate_input."""
-        if skip_validation:
-            return [self.research_task()]
-        validation = self.validate_input()
-        research = Task(
-            config=self.tasks_config["research_task"],  # type: ignore[index]
-            output_pydantic=ResearchOutput,
-            context=[validation],
+        """Build the research task list, optionally prepending validate_input.
+
+        Uses the split three-task architecture by default: external research
+        (Tavily + CompetitiveIntel), customer evidence (Dovetail only), then
+        synthesis (no tools, merges both into ResearchOutput).
+        """
+        tasks: list[Task] = []
+
+        if not skip_validation:
+            tasks.append(self.validate_input())
+
+        # Task 1: External research (Tavily + CompetitiveIntel only)
+        external_task = Task(
+            config=self.tasks_config["external_research_task"],  # type: ignore[index]
+            output_pydantic=ExternalResearchOutput,
+            context=tasks[-1:] if tasks else [],  # context from validation if present
         )
-        return [validation, research]
+        tasks.append(external_task)
+
+        # Task 2: Customer evidence (Dovetail only)
+        evidence_task = Task(
+            config=self.tasks_config["customer_evidence_task"],  # type: ignore[index]
+            output_pydantic=CustomerEvidenceOutput,
+        )
+        tasks.append(evidence_task)
+
+        # Task 3: Synthesis (no tools, merges both into ResearchOutput)
+        synthesis_task = Task(
+            config=self.tasks_config["research_synthesis_task"],  # type: ignore[index]
+            output_pydantic=ResearchOutput,
+            context=[external_task, evidence_task],
+        )
+        tasks.append(synthesis_task)
+
+        return tasks
 
     @crew
     def crew(self) -> Crew:

@@ -29,6 +29,10 @@ from pm_agent_system.models.research_output import (
     PainPoint,
     ResearchOutput,
 )
+from pm_agent_system.models.research_intermediate import (
+    CustomerEvidenceOutput,
+    ExternalResearchOutput,
+)
 
 __all__ = [
     "BRDOutput",
@@ -37,6 +41,7 @@ __all__ = [
     "CompetitorAnalysis",
     "CostFlag",
     "CustomerQuote",
+    "CustomerEvidenceOutput",
     "DesignBriefOutput",
     "DesignFlowStep",
     "DesignUserFlow",
@@ -49,6 +54,7 @@ __all__ = [
     "PainPoint",
     "PRFAQOutput",
     "ResearchOutput",
+    "ExternalResearchOutput",
     "Risk",
     "ScreenEntry",
     "SuccessMetric",
