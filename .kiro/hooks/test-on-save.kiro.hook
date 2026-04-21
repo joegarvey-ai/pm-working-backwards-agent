@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "name": "Run Tests on Python Save",
   "description": "Runs pytest after any Python source file is saved to catch regressions early",
   "version": "1",

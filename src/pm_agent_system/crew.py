@@ -74,7 +74,7 @@ class PmAgentSystem:
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
             ],
-            llm=_llm(_DEFAULT_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )
 

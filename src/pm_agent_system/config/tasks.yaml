@@ -90,11 +90,16 @@ research_task:
        the limited data and rely on web research for that competitor's
        analysis.
 
-    3. **Customer evidence.** Use the Dovetail research tool to find:
-       - Customer interview transcripts related to the problem
-       - Usability findings and highlights
-       - Published insights from prior research
-       - Direct customer quotes, attributed by source
+    3. **Customer evidence.** Use the Dovetail research tool with
+       action='deep_search' and a keyword query related to the problem
+       space. This will automatically search the workspace, find relevant
+       projects, and fetch the full content of published insights
+       including direct customer quotes. Run at least two deep_search
+       calls with different queries (e.g., one for the core problem,
+       one for the user persona). Extract direct quotes, quantified
+       metrics, and attributed findings from the returned insight
+       content. If you need more detail on a specific insight, use
+       action='insight_content' with the insight_id.
 
     4. **Internal context.** If the PM provided internal context file paths,
        use the file reader tool to read those documents and extract relevant
@@ -162,9 +167,9 @@ research_task:
     - If you have fewer than 3 competitors after searching, report what
       you found and note the gap. Do not invent competitors.
     - If Dovetail returns no results or is unavailable, note "No internal
-      customer research data was available" in the customer_evidence
-      section and add it to gaps_and_limitations. Do not fabricate
-      interview quotes.
+      customer research data was available from Dovetail" in the
+      customer_evidence section and add it to gaps_and_limitations.
+      Do not fabricate interview quotes.
 
   expected_output: >
     A markdown document with the following sections. Every factual claim
