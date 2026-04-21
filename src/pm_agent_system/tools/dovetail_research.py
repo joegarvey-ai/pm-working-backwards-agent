@@ -18,6 +18,8 @@ Supported actions (the agent picks one per call):
 import json
 import logging
 import os
+from datetime import datetime
+from pathlib import Path
 from typing import Type
 
 import httpx
@@ -26,6 +28,28 @@ from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+
+# Dedicated file logger for Dovetail tool invocations. Writes to
+# output/dovetail_calls.log so we can verify whether the agent called
+# this tool during a run, what it asked for, and what came back.
+_CALL_LOG_PATH = Path(os.getenv("OUTPUT_DIR", "./output")) / "dovetail_calls.log"
+
+
+def _log_call(event: str, details: dict) -> None:
+    """Append one JSON line to the Dovetail call log. Never raises."""
+    try:
+        _CALL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "event": event,
+            **details,
+        }
+        with _CALL_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        # Logging must never break the tool.
+        pass
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
@@ -230,88 +254,123 @@ class DovetailSearchTool(BaseTool):
         data_id: str = "",
         limit: int = 10,
     ) -> str:
+        _log_call("invocation", {
+            "action": action,
+            "query": query,
+            "project_id": project_id,
+            "insight_id": insight_id,
+            "data_id": data_id,
+            "limit": limit,
+        })
         try:
             _ = self._get_headers()
         except ValueError as e:
             logger.warning("Dovetail auth error: %s", e)
+            _log_call("auth_error", {"message": str(e)})
             return str(e)
 
         limit = max(1, min(int(limit or 10), 100))
 
         try:
-            if action == "deep_search":
-                if not query.strip():
-                    return "Dovetail 'deep_search' requires a non-empty query."
-                return self._deep_search(query, limit)
-
-            if action == "search":
-                if not query.strip():
-                    return "Dovetail 'search' requires a non-empty query."
-                data = self._call_mcp(
-                    "search_workspace", {"query": query, "limit": limit}
-                )
-                text = self._extract_text(data)
-                return text or f"No Dovetail results for: {query}"
-
-            if action == "insights":
-                if not project_id.strip():
-                    return (
-                        "Dovetail 'insights' requires a project_id. "
-                        "Run action='search' first to find one."
-                    )
-                data = self._call_mcp(
-                    "list_project_insights",
-                    {"project_id": project_id, "limit": limit},
-                )
-                text = self._extract_text(data)
-                return text or f"No insights for project: {project_id}"
-
-            if action == "insight_content":
-                if not insight_id.strip():
-                    return (
-                        "Dovetail 'insight_content' requires an insight_id. "
-                        "Run action='insights' with a project_id first."
-                    )
-                data = self._call_mcp(
-                    "get_insight_content", {"insight_id": insight_id}
-                )
-                text = self._extract_text(data)
-                parsed = self._parse_json_text(text)
-                md = parsed.get("data", {}).get("content_markdown", "")
-                return md if md.strip() else text or f"No content for insight: {insight_id}"
-
-            if action == "highlights":
-                if not project_id.strip():
-                    return (
-                        "Dovetail 'highlights' requires a project_id. "
-                        "Run action='search' first to find one."
-                    )
-                data = self._call_mcp(
-                    "get_project_highlights",
-                    {"project_id": project_id, "limit": limit},
-                )
-                text = self._extract_text(data)
-                return text or f"No highlights for project: {project_id}"
-
-            if action == "data_content":
-                if not data_id.strip():
-                    return "Dovetail 'data_content' requires a data_id."
-                data = self._call_mcp(
-                    "get_data_content", {"data_id": data_id}
-                )
-                text = self._extract_text(data)
-                parsed = self._parse_json_text(text)
-                md = parsed.get("data", {}).get("content_markdown", "")
-                return md if md.strip() else text or f"No content for data: {data_id}"
-
-            return (
-                f"Unknown action '{action}'. Use 'deep_search', 'search', "
-                f"'insights', 'insight_content', 'highlights', or 'data_content'."
-            )
-
+            result = self._dispatch(query, action, project_id, insight_id, data_id, limit)
+            _log_call("response", {
+                "action": action,
+                "response_chars": len(result),
+                "response_preview": result[:300],
+            })
+            return result
         except httpx.HTTPStatusError as e:
             logger.warning("Dovetail API HTTP error (action=%s): %s", action, e)
+            _log_call("http_error", {
+                "action": action,
+                "status": e.response.status_code,
+                "body": e.response.text[:300],
+            })
             return f"Dovetail API error (HTTP {e.response.status_code}): {e.response.text}"
         except Exception as e:
             logger.warning("Dovetail connection error (action=%s): %s", action, e)
+            _log_call("exception", {
+                "action": action,
+                "type": type(e).__name__,
+                "message": str(e),
+            })
             return f"Error connecting to Dovetail: {e}"
+
+    def _dispatch(
+        self,
+        query: str,
+        action: str,
+        project_id: str,
+        insight_id: str,
+        data_id: str,
+        limit: int,
+    ) -> str:
+        if action == "deep_search":
+            if not query.strip():
+                return "Dovetail 'deep_search' requires a non-empty query."
+            return self._deep_search(query, limit)
+
+        if action == "search":
+            if not query.strip():
+                return "Dovetail 'search' requires a non-empty query."
+            data = self._call_mcp(
+                "search_workspace", {"query": query, "limit": limit}
+            )
+            text = self._extract_text(data)
+            return text or f"No Dovetail results for: {query}"
+
+        if action == "insights":
+            if not project_id.strip():
+                return (
+                    "Dovetail 'insights' requires a project_id. "
+                    "Run action='search' first to find one."
+                )
+            data = self._call_mcp(
+                "list_project_insights",
+                {"project_id": project_id, "limit": limit},
+            )
+            text = self._extract_text(data)
+            return text or f"No insights for project: {project_id}"
+
+        if action == "insight_content":
+            if not insight_id.strip():
+                return (
+                    "Dovetail 'insight_content' requires an insight_id. "
+                    "Run action='insights' with a project_id first."
+                )
+            data = self._call_mcp(
+                "get_insight_content", {"insight_id": insight_id}
+            )
+            text = self._extract_text(data)
+            parsed = self._parse_json_text(text)
+            md = parsed.get("data", {}).get("content_markdown", "")
+            return md if md.strip() else text or f"No content for insight: {insight_id}"
+
+        if action == "highlights":
+            if not project_id.strip():
+                return (
+                    "Dovetail 'highlights' requires a project_id. "
+                    "Run action='search' first to find one."
+                )
+            data = self._call_mcp(
+                "get_project_highlights",
+                {"project_id": project_id, "limit": limit},
+            )
+            text = self._extract_text(data)
+            return text or f"No highlights for project: {project_id}"
+
+        if action == "data_content":
+            if not data_id.strip():
+                return "Dovetail 'data_content' requires a data_id."
+            data = self._call_mcp(
+                "get_data_content", {"data_id": data_id}
+            )
+            text = self._extract_text(data)
+            parsed = self._parse_json_text(text)
+            md = parsed.get("data", {}).get("content_markdown", "")
+            return md if md.strip() else text or f"No content for data: {data_id}"
+
+        return (
+            f"Unknown action '{action}'. Use 'deep_search', 'search', "
+            f"'insights', 'insight_content', 'highlights', or 'data_content'."
+        )
