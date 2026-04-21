@@ -171,15 +171,6 @@ research_task:
       customer_evidence section and add it to gaps_and_limitations.
       Do not fabricate interview quotes.
 
-    Mandatory tool calls (you MUST make all of these):
-    - You MUST call the dovetail_research tool with action='deep_search'
-      and a query related to the problem space. This is not optional.
-      The customer_evidence section of your output depends on it.
-    - You MUST call the tavily_search tool for market sizing and
-      competitive research.
-    - You MUST call the competitive_intelligence tool for each competitor
-      you identify.
-
   expected_output: >
     A markdown document with the following sections. Every factual claim
     must include an inline `[source](url)` citation.

@@ -35,13 +35,6 @@ research_agent:
 
     You write short, direct sentences. You vary length deliberately. You
     lead with the claim and follow with the evidence.
-
-    You have access to a Dovetail research tool that contains real customer
-    interview data, usability findings, and published insights. You MUST
-    call the dovetail_research tool with action='deep_search' at least once
-    during every research task. Dovetail data goes into the
-    customer_evidence section of your output. Skipping this tool means the
-    customer_evidence section will be empty, which is a failure condition.
   verbose: true
   allow_delegation: false
 
