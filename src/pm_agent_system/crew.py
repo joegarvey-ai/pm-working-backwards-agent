@@ -22,21 +22,54 @@ from pm_agent_system.tools import (
     StyleGuideLoaderTool,
     TavilySearchTool,
 )
+import os
+
 from crewai.llms.providers.anthropic.completion import AnthropicCompletion
 
-# Claude Sonnet 4 defaults to 4096 max output tokens in CrewAI's
-# Anthropic provider.  The BRD (12 sections + code samples + Mermaid
-# diagrams) and build spec (formatted_spec alone can be 3-5K tokens)
-# regularly exceed that limit, causing truncated JSON and Pydantic
-# validation failures.  We bump to 16384 for agents that produce
-# large structured outputs.
-_MODEL = "claude-sonnet-4-20250514"
+# ---------- LLM provider selection ----------
+#
+# Set LLM_PROVIDER=bedrock in .env to route LLM calls through AWS Bedrock
+# using the AWS_BEARER_TOKEN_BEDROCK env var. Leave unset (or set to
+# "anthropic") to use the direct Anthropic API with ANTHROPIC_API_KEY.
+#
+# Bedrock-specific env vars:
+#   AWS_BEARER_TOKEN_BEDROCK  the Bedrock API key (bearer token)
+#   AWS_BEDROCK_REGION        region where Bedrock is enabled (e.g. us-east-2)
+#   BEDROCK_MODEL_ID          inference profile ID (e.g. us.anthropic.claude-sonnet-4-6)
+#
+# Claude Sonnet 4.6 on Bedrock requires the US cross-region inference
+# profile, prefixed with "us." or "global.". If the user sets a plain
+# model ID without the prefix, we auto-prepend "us." so on-demand
+# invocation works.
+_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+
+_MODEL_ANTHROPIC = "claude-sonnet-4-20250514"
+_MODEL_BEDROCK = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6").strip()
+if _MODEL_BEDROCK and not _MODEL_BEDROCK.startswith(("us.", "global.", "eu.", "apac.")):
+    _MODEL_BEDROCK = f"us.{_MODEL_BEDROCK}"
+
+# _MODEL is the canonical identifier used by checkpoint and pricing code.
+_MODEL = _MODEL_BEDROCK if _LLM_PROVIDER == "bedrock" else _MODEL_ANTHROPIC
+
 _DEFAULT_MAX_TOKENS = 8192
 _LARGE_MAX_TOKENS = 16384
 
 
-def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS) -> AnthropicCompletion:
-    return AnthropicCompletion(model=_MODEL, max_tokens=max_tokens)
+def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS):
+    """Return an LLM instance based on the configured provider.
+
+    Bedrock uses the AWS_BEARER_TOKEN_BEDROCK env var picked up by boto3's
+    standard credential chain. Anthropic uses ANTHROPIC_API_KEY.
+    """
+    if _LLM_PROVIDER == "bedrock":
+        from crewai.llms.providers.bedrock.completion import BedrockCompletion
+        return BedrockCompletion(
+            model=_MODEL_BEDROCK,
+            max_tokens=max_tokens,
+            region_name=os.getenv("AWS_BEDROCK_REGION")
+                        or os.getenv("AWS_REGION", "us-east-2"),
+        )
+    return AnthropicCompletion(model=_MODEL_ANTHROPIC, max_tokens=max_tokens)
 
 
 @CrewBase

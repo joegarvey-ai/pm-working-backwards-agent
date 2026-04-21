@@ -10,6 +10,16 @@ MODEL_PRICING = {
         "input_per_1m": 3.00,
         "output_per_1m": 15.00,
     },
+    # Bedrock inference profile IDs for Claude Sonnet 4.6.
+    # Pricing is the same as direct Anthropic; AWS passes through the rate.
+    "us.anthropic.claude-sonnet-4-6": {
+        "input_per_1m": 3.00,
+        "output_per_1m": 15.00,
+    },
+    "global.anthropic.claude-sonnet-4-20250514-v1:0": {
+        "input_per_1m": 3.00,
+        "output_per_1m": 15.00,
+    },
     # Add other models here as needed.
 }
 
