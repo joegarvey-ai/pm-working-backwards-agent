@@ -54,7 +54,7 @@ if _MODEL_BEDROCK and not _MODEL_BEDROCK.startswith(("us.", "global.", "eu.", "a
 _MODEL = _MODEL_BEDROCK if _LLM_PROVIDER == "bedrock" else _MODEL_ANTHROPIC
 
 _DEFAULT_MAX_TOKENS = 8192
-_LARGE_MAX_TOKENS = 16384
+_LARGE_MAX_TOKENS = 32768
 
 
 def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS):
