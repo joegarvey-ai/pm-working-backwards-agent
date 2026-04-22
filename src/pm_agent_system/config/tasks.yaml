@@ -1248,6 +1248,81 @@ generate_brd_standalone:
   agent: brd_agent
   human_input: true
 
+# ---------- Split build spec tasks ----------
+# These two tasks replace the monolithic build spec task to avoid
+# Bedrock read timeouts on large outputs. Task 1 produces the
+# structure (all fields except formatted_spec). Task 2 produces
+# only the formatted_spec from the structure via context.
+
+build_spec_structure_standalone:
+  description: >
+    Produce the structure of a build spec from an approved BRD on disk.
+    Do NOT generate the formatted_spec field. That will be done in a
+    separate follow-up task.
+
+    ## Inputs
+
+    **Approved BRD file path:** {brd_path}
+
+    **Target tool:** {target_tool}
+
+    ## Process
+
+    1. **Load the style guide** via style_guide_loader for any prose.
+    2. **Read the BRD** from {brd_path} using file_reader.
+    3. **Carry acceptance criteria forward EXACTLY** from the BRD.
+    4. **Carry forward code samples** from the BRD.
+    5. **Identify out-of-scope items.**
+
+    ## Output
+
+    Return a BuildSpecStructureOutput JSON with: build_summary,
+    user_flows, feature_specs, technical_constraints,
+    architecture_reference, current_state_context, out_of_scope,
+    and target_tool. Do NOT include a formatted_spec field.
+
+  expected_output: >
+    A BuildSpecStructureOutput JSON object with all fields populated
+    except formatted_spec. acceptance_criteria in feature_specs match
+    the BRD verbatim.
+
+  agent: brd_agent
+  human_input: false
+
+format_spec_standalone:
+  description: >
+    You have a completed BuildSpecStructureOutput from the prior task.
+    Your only job is to reformat it into the tool-specific
+    formatted_spec string. You have NO tools. Do not search for
+    anything new. Work only from the prior task output.
+
+    ## Inputs
+
+    **Target tool:** {target_tool}
+
+    ## Formatting rules
+
+    - **kiro**: Format as a Kiro-compatible spec with three sections:
+      Requirements (use EARS notation if natural), Design (architecture,
+      data models, sequence diagrams), and Tasks (implementation steps).
+    - **claude_code**: Structured markdown prompt with ## What this
+      builds, ## Step 1..N, ## What NOT to do, ## How to verify.
+    - **cursor**: Composer-ready markdown with Context, Requirements,
+      Constraints, and References sections.
+    - **lovable**: Natural language Agent Mode prompt, narrative prose.
+
+    ## Output
+
+    Return a FormattedSpecOutput JSON with two fields: formatted_spec
+    (the complete tool-ready string) and target_tool.
+
+  expected_output: >
+    A FormattedSpecOutput JSON object with formatted_spec populated
+    as the complete tool-specific output for the requested target_tool.
+
+  agent: brd_agent
+  human_input: true
+
 generate_build_spec_standalone:
   description: >
     Produce a build spec from an approved BRD that already exists on disk.

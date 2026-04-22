@@ -10,6 +10,10 @@ from pm_agent_system.models import (
     PRFAQOutput,
     ResearchOutput,
 )
+from pm_agent_system.models.build_spec_intermediate import (
+    BuildSpecStructureOutput,
+    FormattedSpecOutput,
+)
 from pm_agent_system.tools import (
     AWSDocsReadTool,
     AWSDocsSearchTool,
@@ -54,7 +58,7 @@ if _MODEL_BEDROCK and not _MODEL_BEDROCK.startswith(("us.", "global.", "eu.", "a
 _MODEL = _MODEL_BEDROCK if _LLM_PROVIDER == "bedrock" else _MODEL_ANTHROPIC
 
 _DEFAULT_MAX_TOKENS = 8192
-_LARGE_MAX_TOKENS = 32768
+_LARGE_MAX_TOKENS = 16384
 
 
 def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS):
@@ -70,6 +74,7 @@ def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS):
             max_tokens=max_tokens,
             region_name=os.getenv("AWS_BEDROCK_REGION")
                         or os.getenv("AWS_REGION", "us-east-2"),
+            stream=True,
         )
     return AnthropicCompletion(model=_MODEL_ANTHROPIC, max_tokens=max_tokens)
 
@@ -429,6 +434,29 @@ class PmAgentSystem:
         return Crew(
             agents=[self.brd_agent()],
             tasks=[self.generate_build_spec_standalone()],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def split_build_spec_crew(self) -> Crew:
+        """Agent 4 only — two-task split build spec from approved BRD on disk.
+
+        Task 1: produce BuildSpecStructureOutput (everything except formatted_spec).
+        Task 2: produce FormattedSpecOutput (just the formatted_spec string).
+        Avoids Bedrock read timeouts by keeping each task under 16K tokens.
+        """
+        structure_task = Task(
+            config=self.tasks_config["build_spec_structure_standalone"],  # type: ignore[index]
+            output_pydantic=BuildSpecStructureOutput,
+        )
+        format_task = Task(
+            config=self.tasks_config["format_spec_standalone"],  # type: ignore[index]
+            output_pydantic=FormattedSpecOutput,
+            context=[structure_task],
+        )
+        return Crew(
+            agents=[self.brd_agent()],
+            tasks=[structure_task, format_task],
             process=Process.sequential,
             verbose=True,
         )

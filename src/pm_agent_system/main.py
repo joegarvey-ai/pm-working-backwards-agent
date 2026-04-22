@@ -1468,17 +1468,49 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
 
     try:
         try:
-            result = PmAgentSystem().regenerate_build_spec_crew().kickoff(inputs=crew_inputs)
+            result = PmAgentSystem().split_build_spec_crew().kickoff(inputs=crew_inputs)
         except Exception as e:
             print(f"\nError running crew: {e}")
             sys.exit(1)
     finally:
         reset_provider(token)
 
-    spec = extract_pydantic_output(result, CodingPromptOutput)
-    if spec is None:
-        print("\nError: did not return a valid CodingPromptOutput.")
+    # The split crew produces two outputs: BuildSpecStructureOutput and
+    # FormattedSpecOutput. Extract both and merge into CodingPromptOutput.
+    from pm_agent_system.models.build_spec_intermediate import (
+        BuildSpecStructureOutput,
+        FormattedSpecOutput,
+    )
+    structure = extract_pydantic_output(result, BuildSpecStructureOutput)
+    fmt = extract_pydantic_output(result, FormattedSpecOutput)
+
+    if structure is None:
+        print("\nError: did not return a valid BuildSpecStructureOutput.")
         sys.exit(1)
+
+    # Merge into CodingPromptOutput for the renderer
+    from pm_agent_system.models import FeatureSpec, UserFlow
+    spec = CodingPromptOutput(
+        build_summary=structure.build_summary,
+        user_flows=[
+            UserFlow(name=uf.name, steps=uf.steps, related_requirements=uf.related_requirements)
+            for uf in structure.user_flows
+        ],
+        feature_specs=[
+            FeatureSpec(
+                name=fs.name, description=fs.description,
+                acceptance_criteria=fs.acceptance_criteria,
+                priority=fs.priority, code_samples=fs.code_samples,
+            )
+            for fs in structure.feature_specs
+        ],
+        technical_constraints=structure.technical_constraints,
+        architecture_reference=structure.architecture_reference,
+        current_state_context=structure.current_state_context,
+        out_of_scope=structure.out_of_scope,
+        target_tool=structure.target_tool,
+        formatted_spec=fmt.formatted_spec if fmt else "",
+    )
 
     bs_record = provider.artifacts.get("build_spec")
     if bs_record is not None:
