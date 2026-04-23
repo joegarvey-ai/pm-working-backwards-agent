@@ -1181,15 +1181,24 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             crew_inputs["design_brief_path"] = design_file
 
             def _resume_task_callback(task_output):
+                now = time.monotonic()
+                task_name = getattr(task_output, "name", None) or type(
+                    getattr(task_output, "pydantic", None)
+                ).__name__
+                task_timings[task_name] = now - task_timings.get("_last_completion_at", t0_pipeline)
+                task_timings["_last_completion_at"] = now
                 _record_artifact_from_task_output(
                     task_output, label, slug, output_dir, checkpoint, provider,
                     vault_config=vault_cfg, product_slug=product_slug,
                 )
 
             try:
+                t0_pipeline = time.monotonic()
+                task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
                 crew = PmAgentSystem().brd_from_prfaq_crew()
                 crew.task_callback = _resume_task_callback
                 result = crew.kickoff(inputs=crew_inputs)
+                elapsed_pipeline = time.monotonic() - t0_pipeline
             except Exception as e:
                 print(f"\nError running Agent 4: {e}")
                 sys.exit(1)
@@ -1208,17 +1217,26 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             print("Human review checkpoints will pause after each agent.\n")
 
             def _task_callback(task_output):
+                now = time.monotonic()
+                task_name = getattr(task_output, "name", None) or type(
+                    getattr(task_output, "pydantic", None)
+                ).__name__
+                task_timings[task_name] = now - task_timings.get("_last_completion_at", t0_pipeline)
+                task_timings["_last_completion_at"] = now
                 _record_artifact_from_task_output(
                     task_output, label, slug, output_dir, checkpoint, provider,
                     vault_config=vault_cfg, product_slug=product_slug,
                 )
 
             try:
+                t0_pipeline = time.monotonic()
+                task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
                 crew = PmAgentSystem().full_pipeline_crew(
                     skip_validation=skip, skip_design=skip_design
                 )
                 crew.task_callback = _task_callback
                 result = crew.kickoff(inputs=crew_inputs)
+                elapsed_pipeline = time.monotonic() - t0_pipeline
             except Exception as e:
                 print(f"\nError running crew: {e}")
                 sys.exit(1)
@@ -1252,6 +1270,38 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 
     # Print cost summary
     _print_cost_summary(result, checkpoint, output_dir)
+
+    # Print per-task wall-clock breakdown (populated by task callbacks)
+    timings_display = {k: v for k, v in task_timings.items() if not k.startswith("_")}
+    if timings_display:
+        print("\nPer-task elapsed (seconds):")
+        for name, sec in timings_display.items():
+            print(f"  {name}:  {sec:.1f}s")
+    print(f"\nTotal pipeline elapsed: {elapsed_pipeline:.1f}s")
+
+    # Append to usage_log.jsonl for trend analysis
+    import json as _json
+    total_in = sum(u.get("input_tokens", 0) for u in _extract_agent_usage(result).values())
+    total_out = sum(u.get("output_tokens", 0) for u in _extract_agent_usage(result).values())
+    total_cost = estimate_cost(_MODEL, total_in, total_out)
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "command": "full-pipeline",
+        "model": _MODEL,
+        "input_tokens": total_in,
+        "output_tokens": total_out,
+        "estimated_cost_usd": round(total_cost, 4),
+        "elapsed_seconds": round(elapsed_pipeline, 1),
+        "product_slug": product_slug or "",
+        "per_task_elapsed": {k: round(v, 1) for k, v in timings_display.items()},
+        "skip_design": skip_design,
+    }
+    log_path = output_dir / "usage_log.jsonl"
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(log_entry) + "\n")
+    except OSError:
+        pass
 
     # Pipeline complete — delete checkpoint
     delete_checkpoint(output_dir)
