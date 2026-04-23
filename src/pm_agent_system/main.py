@@ -1348,7 +1348,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
 
     try:
         try:
-            crew = PmAgentSystem().brd_from_prfaq_crew()
+            crew = PmAgentSystem().split_brd_crew()
             crew.task_callback = _task_callback
             result = crew.kickoff(inputs=crew_inputs)
         except Exception as e:

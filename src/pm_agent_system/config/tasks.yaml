@@ -1093,6 +1093,125 @@ generate_build_spec_chained:
   context:
     - generate_brd_chained
 
+# ---------- Split BRD tasks ----------
+# Three tasks replace the monolithic BRD generation to avoid Bedrock
+# read timeouts. Each task stays under 16K output tokens.
+
+brd_structure_task:
+  description: >
+    Read the approved PRFAQ and research brief, then produce the core
+    BRD structure: executive summary, problem statement, solution
+    overview (with Mermaid diagram), user stories, functional
+    requirements with acceptance criteria and code samples,
+    non-functional requirements, and technical context.
+
+    Do NOT produce cost flags, risks, success metrics, or timeline.
+    Those will be handled in a separate follow-up task.
+
+    ## Inputs
+
+    **Approved PRFAQ file path:** {prfaq_path}
+    **Research brief file path:** {research_path}
+    **Design brief file path:** {design_brief_path}
+    **Known Constraints:** {known_constraints}
+    **Business Context:** {business_context}
+
+    ## Process
+
+    1. Load the style guide via style_guide_loader.
+    2. Read the PRFAQ from {prfaq_path} using file_reader.
+    3. If {research_path} is non-empty, read it for market and
+       customer evidence. Reference competitors by name.
+    4. If {design_brief_path} is non-empty, read it and reference
+       screen names in user stories.
+    5. Apply the AWS-first rule for all architecture references.
+    6. Every functional requirement must reference at least one user
+       story ID. Every user story must reference a PRFAQ section.
+    7. Include code samples (API contracts, schemas, Mermaid diagrams)
+       in functional requirements.
+
+    ## Output
+
+    Return a BRDStructureOutput JSON. Do NOT include cost_flags,
+    risks, success_metrics, timeline_and_milestones, or
+    version_history fields.
+
+  expected_output: >
+    A BRDStructureOutput JSON with executive_summary, problem_statement,
+    proposed_solution_overview (with Mermaid diagram), user_stories (3+),
+    functional_requirements (3+ with acceptance criteria and code samples),
+    non_functional_requirements (2+), and technical_context_and_dependencies.
+
+  agent: brd_agent
+  human_input: false
+
+brd_cost_risk_task:
+  description: >
+    You have a completed BRDStructureOutput from the prior task. Now
+    produce the cost flags, risks, success metrics, timeline, and
+    version history.
+
+    Use Tavily and the AWS pricing lookup tool to find real pricing
+    data for cost-flagged decisions. Include specific per-unit prices.
+
+    ## Inputs
+
+    **Business Context:** {business_context}
+    **Success Metrics:** {success_metrics}
+    **Timing:** {timing}
+
+    ## Process
+
+    1. Review the BRDStructureOutput from the prior task context.
+    2. For each architectural decision with cost implications, use
+       aws_pricing_lookup or tavily_search to find real pricing.
+    3. Produce cost flags with decision, why_it_matters, tradeoff,
+       reference_url, and pricing_data.
+    4. Produce risks (2+) based on gaps from the PRFAQ and technical
+       complexity from the structure.
+    5. Produce success metrics using business_context as baseline
+       values and success_metrics as targets.
+    6. Produce timeline_and_milestones from the timing input.
+    7. Add version_history with v1.0, today's date, author "Agent 4".
+
+    ## Output
+
+    Return a BRDCostRiskOutput JSON with cost_flags, risks (2+),
+    success_metrics (1+), timeline_and_milestones, and
+    version_history (1+).
+
+  expected_output: >
+    A BRDCostRiskOutput JSON with cost_flags containing real pricing
+    data, risks (2+), success_metrics (1+) with baseline and target
+    values, timeline_and_milestones, and version_history starting at v1.0.
+
+  agent: brd_agent
+  human_input: false
+
+brd_assembly_task:
+  description: >
+    You have two completed outputs from prior tasks:
+    1. BRDStructureOutput (prose, user stories, requirements)
+    2. BRDCostRiskOutput (cost flags, risks, metrics, timeline)
+
+    Merge them into a single BRDOutput. You have NO tools. Do not
+    search for anything new. Work only from the prior task outputs.
+
+    Copy all fields directly. Do not modify acceptance criteria,
+    code samples, or pricing data. Preserve everything verbatim.
+
+    ## Output
+
+    Return a BRDOutput JSON with all 12 sections populated by
+    merging the two prior outputs.
+
+  expected_output: >
+    A BRDOutput JSON with all fields populated from the two prior
+    task outputs. No new content generated.
+
+  agent: brd_agent
+  human_input: true
+
 generate_brd_standalone:
   description: >
     Produce a complete BRD v1.0 from an approved PRFAQ and research brief

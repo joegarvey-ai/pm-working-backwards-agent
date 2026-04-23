@@ -14,6 +14,10 @@ from pm_agent_system.models.build_spec_intermediate import (
     BuildSpecStructureOutput,
     FormattedSpecOutput,
 )
+from pm_agent_system.models.brd_intermediate import (
+    BRDCostRiskOutput,
+    BRDStructureOutput,
+)
 from pm_agent_system.tools import (
     AWSDocsReadTool,
     AWSDocsSearchTool,
@@ -416,6 +420,35 @@ class PmAgentSystem:
         return Crew(
             agents=[self.brd_agent()],
             tasks=[brd_task, spec_task],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def split_brd_crew(self) -> Crew:
+        """Agent 4 only — three-task split BRD from approved PRFAQ on disk.
+
+        Task 1: produce BRDStructureOutput (prose, user stories, requirements).
+        Task 2: produce BRDCostRiskOutput (cost flags, risks, metrics).
+        Task 3: merge both into final BRDOutput.
+        Avoids Bedrock read timeouts by keeping each task under 16K tokens.
+        """
+        structure_task = Task(
+            config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
+            output_pydantic=BRDStructureOutput,
+        )
+        cost_risk_task = Task(
+            config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
+            output_pydantic=BRDCostRiskOutput,
+            context=[structure_task],
+        )
+        assembly_task = Task(
+            config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
+            output_pydantic=BRDOutput,
+            context=[structure_task, cost_risk_task],
+        )
+        return Crew(
+            agents=[self.brd_agent()],
+            tasks=[structure_task, cost_risk_task, assembly_task],
             process=Process.sequential,
             verbose=True,
         )
