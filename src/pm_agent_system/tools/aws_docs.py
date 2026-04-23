@@ -17,17 +17,37 @@ def _uvx_available() -> bool:
 
 
 def _call_mcp(tool_name: str, arguments: dict) -> str:
-    """Send a single MCP tool call to the AWS docs server via uvx and return the text content."""
-    payload = {
+    """Send a single MCP tool call to the AWS docs server via uvx and return the text content.
+
+    Performs the required MCP initialize handshake before the tool call.
+    """
+    init_msg = json.dumps({
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "pm-agent", "version": "1.0"},
+        },
+        "id": 0,
+    })
+    initialized_msg = json.dumps({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {},
+    })
+    tool_msg = json.dumps({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments},
-    }
+    })
+    payload = init_msg + "\n" + initialized_msg + "\n" + tool_msg + "\n"
+
     try:
         result = subprocess.run(
             ["uvx", _MCP_SERVER],
-            input=json.dumps(payload),
+            input=payload,
             capture_output=True,
             text=True,
             timeout=30,
@@ -39,20 +59,28 @@ def _call_mcp(tool_name: str, arguments: dict) -> str:
 
     if result.returncode != 0:
         logger.warning("AWS docs MCP stderr: %s", result.stderr)
-        return f"Error from AWS docs MCP server: {result.stderr.strip() or 'unknown error'}"
 
-    try:
-        response = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return f"Error: could not parse MCP response: {result.stdout[:500]}"
+    # Parse the tool call response (id=1) from the output
+    for line in result.stdout.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if response.get("id") != 1:
+            continue
 
-    error = response.get("error")
-    if error:
-        return f"MCP error {error.get('code')}: {error.get('message')}"
+        error = response.get("error")
+        if error:
+            return f"MCP error {error.get('code')}: {error.get('message')}"
 
-    content_blocks = response.get("result", {}).get("content", [])
-    texts = [block.get("text", "") for block in content_blocks if block.get("type") == "text"]
-    return "\n\n".join(texts) if texts else "No content returned."
+        content_blocks = response.get("result", {}).get("content", [])
+        texts = [block.get("text", "") for block in content_blocks if block.get("type") == "text"]
+        return "\n\n".join(texts) if texts else "No content returned."
+
+    return f"Error: no response received for tool call '{tool_name}'"
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +105,7 @@ class AWSDocsSearchTool(BaseTool):
     def _run(self, query: str, limit: int = 5) -> str:
         if not _uvx_available():
             return "Error: uvx not found. Install uv to enable AWS docs lookup."
-        return _call_mcp("search_documentation", {"query": query, "limit": limit})
+        return _call_mcp("search_documentation", {"search_phrase": query, "limit": limit})
 
 
 # ---------------------------------------------------------------------------
