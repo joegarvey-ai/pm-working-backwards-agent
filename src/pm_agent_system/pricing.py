@@ -20,7 +20,15 @@ MODEL_PRICING = {
         "input_per_1m": 3.00,
         "output_per_1m": 15.00,
     },
-    # Add other models here as needed.
+    # Claude Haiku 4.5 (used for dev/testing, lower cost, faster).
+    "anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "input_per_1m": 0.80,
+        "output_per_1m": 4.00,
+    },
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "input_per_1m": 0.80,
+        "output_per_1m": 4.00,
+    },
 }
 
 

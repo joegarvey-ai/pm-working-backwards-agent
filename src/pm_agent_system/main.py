@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -525,12 +526,16 @@ def cmd_research(args: argparse.Namespace) -> None:
     skip = getattr(args, "skip_validation", False)
     try:
         try:
+            t0 = time.monotonic()
             result = PmAgentSystem().research_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
+            elapsed = time.monotonic() - t0
         except Exception as e:
             print(f"\nError running crew: {e}")
             sys.exit(1)
     finally:
         reset_provider(token)
+
+    _print_run_metrics(result, "research", elapsed, product_slug or "")
 
     research = extract_pydantic_output(result, ResearchOutput)
     if research is None:
@@ -614,12 +619,16 @@ def cmd_generate(args: argparse.Namespace) -> None:
     skip = getattr(args, "skip_validation", False)
     try:
         try:
+            t0 = time.monotonic()
             result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
+            elapsed = time.monotonic() - t0
         except Exception as e:
             print(f"\nError running crew: {e}")
             sys.exit(1)
     finally:
         reset_provider(token)
+
+    _print_run_metrics(result, "generate", elapsed, product_slug or "")
 
     prfaq = extract_pydantic_output(result, PRFAQOutput)
     if prfaq is None:
@@ -858,6 +867,38 @@ def _print_cost_summary(result, checkpoint, output_dir):
             checkpoint["artifacts"][artifact_key]["tokens_out"] = usage["output_tokens"]
             checkpoint["artifacts"][artifact_key]["estimated_cost_usd"] = round(cost, 4)
     save_checkpoint(output_dir, checkpoint)
+
+
+def _print_run_metrics(result, command: str, elapsed_seconds: float, product_slug: str = "") -> None:
+    """Print cost summary and log run metrics to JSONL for any command."""
+    agent_usage = _extract_agent_usage(result)
+    if agent_usage:
+        print(format_cost_summary(agent_usage, _MODEL))
+
+    total_in = sum(u.get("input_tokens", 0) for u in agent_usage.values())
+    total_out = sum(u.get("output_tokens", 0) for u in agent_usage.values())
+    total_cost = estimate_cost(_MODEL, total_in, total_out)
+
+    print(f"Elapsed: {elapsed_seconds:.1f}s")
+
+    # Append to JSONL log
+    import json
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "command": command,
+        "model": _MODEL,
+        "input_tokens": total_in,
+        "output_tokens": total_out,
+        "estimated_cost_usd": round(total_cost, 4),
+        "elapsed_seconds": round(elapsed_seconds, 1),
+        "product_slug": product_slug,
+    }
+    log_path = _output_dir() / "usage_log.jsonl"
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except OSError:
+        pass  # Non-blocking; don't fail the command over logging
 
 
 def _record_artifact_from_task_output(
@@ -1348,14 +1389,18 @@ def cmd_brd(args: argparse.Namespace) -> None:
 
     try:
         try:
+            t0 = time.monotonic()
             crew = PmAgentSystem().split_brd_crew()
             crew.task_callback = _task_callback
             result = crew.kickoff(inputs=crew_inputs)
+            elapsed = time.monotonic() - t0
         except Exception as e:
             print(f"\nError running crew: {e}")
             sys.exit(1)
     finally:
         reset_provider(token)
+
+    _print_run_metrics(result, "brd", elapsed, product_slug or "")
 
     # Confirm the final typed output was produced
     spec = extract_pydantic_output(result, CodingPromptOutput)
@@ -1468,12 +1513,16 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
 
     try:
         try:
+            t0 = time.monotonic()
             result = PmAgentSystem().split_build_spec_crew().kickoff(inputs=crew_inputs)
+            elapsed = time.monotonic() - t0
         except Exception as e:
             print(f"\nError running crew: {e}")
             sys.exit(1)
     finally:
         reset_provider(token)
+
+    _print_run_metrics(result, "build-spec", elapsed, product_slug or "")
 
     # The split crew produces two outputs: BuildSpecStructureOutput and
     # FormattedSpecOutput. Extract both and merge into CodingPromptOutput.
