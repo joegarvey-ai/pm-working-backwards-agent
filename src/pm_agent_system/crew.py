@@ -174,6 +174,7 @@ class PmAgentSystem:
     def validate_input(self) -> Task:
         return Task(
             config=self.tasks_config["validate_input"],  # type: ignore[index]
+            name="validate_input",
         )
 
     @task
@@ -181,6 +182,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["research_task"],  # type: ignore[index]
             output_pydantic=ResearchOutput,
+            name="research_task",
         )
 
     @task
@@ -189,6 +191,7 @@ class PmAgentSystem:
             config=self.tasks_config["generate_prfaq"],  # type: ignore[index]
             output_pydantic=PRFAQOutput,
             context=[self.research_task()],
+            name="generate_prfaq",
         )
 
     @task
@@ -196,6 +199,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["revise_prfaq"],  # type: ignore[index]
             output_pydantic=PRFAQOutput,
+            name="revise_prfaq",
         )
 
     @task
@@ -203,6 +207,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["generate_design_brief"],  # type: ignore[index]
             output_pydantic=DesignBriefOutput,
+            name="generate_design_brief",
         )
 
     @task
@@ -210,6 +215,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["revise_design_brief"],  # type: ignore[index]
             output_pydantic=DesignBriefOutput,
+            name="revise_design_brief",
         )
 
     @task
@@ -218,6 +224,7 @@ class PmAgentSystem:
             config=self.tasks_config["generate_brd_chained"],  # type: ignore[index]
             output_pydantic=BRDOutput,
             context=[self.research_task(), self.generate_prfaq()],
+            name="generate_brd_chained",
         )
 
     @task
@@ -225,6 +232,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["generate_brd_standalone"],  # type: ignore[index]
             output_pydantic=BRDOutput,
+            name="generate_brd_standalone",
         )
 
     @task
@@ -232,6 +240,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["revise_brd"],  # type: ignore[index]
             output_pydantic=BRDOutput,
+            name="revise_brd",
         )
 
     @task
@@ -240,6 +249,7 @@ class PmAgentSystem:
             config=self.tasks_config["generate_build_spec_chained"],  # type: ignore[index]
             output_pydantic=CodingPromptOutput,
             context=[self.generate_brd_chained()],
+            name="generate_build_spec_chained",
         )
 
     @task
@@ -247,6 +257,7 @@ class PmAgentSystem:
         return Task(
             config=self.tasks_config["generate_build_spec_standalone"],  # type: ignore[index]
             output_pydantic=CodingPromptOutput,
+            name="generate_build_spec_standalone",
         )
 
     # ---------- Crews ----------
@@ -264,25 +275,34 @@ class PmAgentSystem:
             tasks.append(self.validate_input())
 
         # Task 1: External research (Tavily + CompetitiveIntel only)
+        # async_execution=True: runs in parallel with customer_evidence_task
+        # since they share no inputs. Synthesis task waits on both.
         external_task = Task(
             config=self.tasks_config["external_research_task"],  # type: ignore[index]
             output_pydantic=ExternalResearchOutput,
             context=tasks[-1:] if tasks else [],  # context from validation if present
+            name="external_research_task",
+            async_execution=True,
         )
         tasks.append(external_task)
 
         # Task 2: Customer evidence (Dovetail only)
+        # async_execution=True: runs in parallel with external_research_task.
         evidence_task = Task(
             config=self.tasks_config["customer_evidence_task"],  # type: ignore[index]
             output_pydantic=CustomerEvidenceOutput,
+            name="customer_evidence_task",
+            async_execution=True,
         )
         tasks.append(evidence_task)
 
         # Task 3: Synthesis (no tools, merges both into ResearchOutput)
+        # CrewAI auto-joins: this task waits for both async predecessors.
         synthesis_task = Task(
             config=self.tasks_config["research_synthesis_task"],  # type: ignore[index]
             output_pydantic=ResearchOutput,
             context=[external_task, evidence_task],
+            name="research_synthesis_task",
         )
         tasks.append(synthesis_task)
 
@@ -435,16 +455,19 @@ class PmAgentSystem:
         structure_task = Task(
             config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
             output_pydantic=BRDStructureOutput,
+            name="brd_structure_task",
         )
         cost_risk_task = Task(
             config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
             output_pydantic=BRDCostRiskOutput,
             context=[structure_task],
+            name="brd_cost_risk_task",
         )
         assembly_task = Task(
             config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
             output_pydantic=BRDOutput,
             context=[structure_task, cost_risk_task],
+            name="brd_assembly_task",
         )
         return Crew(
             agents=[self.brd_agent()],
@@ -481,11 +504,13 @@ class PmAgentSystem:
         structure_task = Task(
             config=self.tasks_config["build_spec_structure_standalone"],  # type: ignore[index]
             output_pydantic=BuildSpecStructureOutput,
+            name="build_spec_structure_task",
         )
         format_task = Task(
             config=self.tasks_config["format_spec_standalone"],  # type: ignore[index]
             output_pydantic=FormattedSpecOutput,
             context=[structure_task],
+            name="format_spec_task",
         )
         return Crew(
             agents=[self.brd_agent()],
