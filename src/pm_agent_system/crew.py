@@ -107,16 +107,54 @@ class PmAgentSystem:
 
     @agent
     def research_agent(self) -> Agent:
+        """Synthesis agent: merges external research and customer evidence.
+
+        This agent has no tools because the research_synthesis_task operates
+        only on prior-task outputs passed via context. The legacy name is
+        preserved for backward compatibility with callers that reference it.
+        """
         return Agent(
             config=self.agents_config["research_agent"],  # type: ignore[index]
             tools=[
+                FileReaderTool(),
+                PriorArtSearchTool(),
+            ],
+            llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
+    @agent
+    def external_research_agent(self) -> Agent:
+        """External market research agent (Tavily + CompetitiveIntel only).
+
+        Isolated from other research agents so that async_execution=True
+        does not interleave tool-use/tool-result messages across agents.
+        """
+        return Agent(
+            config=self.agents_config["external_research_agent"],  # type: ignore[index]
+            tools=[
                 TavilySearchTool(),
                 CompetitiveIntelTool(),
-                DovetailSearchTool(),
                 FileReaderTool(),
                 PriorArtSearchTool(),
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
+            ],
+            llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
+    @agent
+    def customer_evidence_agent(self) -> Agent:
+        """Customer evidence research agent (Dovetail only).
+
+        Isolated from other research agents so that async_execution=True
+        does not interleave tool-use/tool-result messages across agents.
+        """
+        return Agent(
+            config=self.agents_config["customer_evidence_agent"],  # type: ignore[index]
+            tools=[
+                DovetailSearchTool(),
             ],
             llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
@@ -275,28 +313,39 @@ class PmAgentSystem:
             tasks.append(self.validate_input())
 
         # Task 1: External research (Tavily + CompetitiveIntel only)
+        # async_execution=True: runs in parallel with customer_evidence_task.
+        # Assigned to a dedicated agent (external_research_agent) so that
+        # concurrent tool-use/tool-result messages do not conflict with
+        # the customer_evidence_agent's conversation state.
         external_task = Task(
             config=self.tasks_config["external_research_task"],  # type: ignore[index]
             output_pydantic=ExternalResearchOutput,
             context=tasks[-1:] if tasks else [],  # context from validation if present
             name="external_research_task",
+            agent=self.external_research_agent(),
+            async_execution=True,
         )
         tasks.append(external_task)
 
         # Task 2: Customer evidence (Dovetail only)
+        # async_execution=True: runs in parallel with external_research_task.
         evidence_task = Task(
             config=self.tasks_config["customer_evidence_task"],  # type: ignore[index]
             output_pydantic=CustomerEvidenceOutput,
             name="customer_evidence_task",
+            agent=self.customer_evidence_agent(),
+            async_execution=True,
         )
         tasks.append(evidence_task)
 
         # Task 3: Synthesis (no tools, merges both into ResearchOutput)
+        # CrewAI auto-joins: this task waits for both async predecessors.
         synthesis_task = Task(
             config=self.tasks_config["research_synthesis_task"],  # type: ignore[index]
             output_pydantic=ResearchOutput,
             context=[external_task, evidence_task],
             name="research_synthesis_task",
+            agent=self.research_agent(),
         )
         tasks.append(synthesis_task)
 
@@ -316,7 +365,11 @@ class PmAgentSystem:
         """Research-only crew with optional validation step."""
         tasks = self._research_tasks(skip_validation)
         return Crew(
-            agents=[self.research_agent()],
+            agents=[
+                self.external_research_agent(),
+                self.customer_evidence_agent(),
+                self.research_agent(),
+            ],
             tasks=tasks,
             process=Process.sequential,
             verbose=True,
@@ -332,7 +385,12 @@ class PmAgentSystem:
         )
         tasks.append(prfaq_task)
         return Crew(
-            agents=[self.research_agent(), self.prfaq_agent()],
+            agents=[
+                self.external_research_agent(),
+                self.customer_evidence_agent(),
+                self.research_agent(),
+                self.prfaq_agent(),
+            ],
             tasks=tasks,
             process=Process.sequential,
             verbose=True,
@@ -404,7 +462,12 @@ class PmAgentSystem:
         )
 
         tasks.append(prfaq_task)
-        agents_list = [self.research_agent(), self.prfaq_agent()]
+        agents_list = [
+            self.external_research_agent(),
+            self.customer_evidence_agent(),
+            self.research_agent(),
+            self.prfaq_agent(),
+        ]
         if design_task is not None:
             tasks.append(design_task)
             agents_list.append(self.design_brief_agent())

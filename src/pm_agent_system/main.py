@@ -1182,11 +1182,13 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 
             def _resume_task_callback(task_output):
                 now = time.monotonic()
-                task_name = getattr(task_output, "name", None) or type(
-                    getattr(task_output, "pydantic", None)
-                ).__name__
-                task_timings[task_name] = now - task_timings.get("_last_completion_at", t0_pipeline)
-                task_timings["_last_completion_at"] = now
+                task_name = (
+                    getattr(task_output, "name", None)
+                    or type(getattr(task_output, "pydantic", None)).__name__
+                    or "unknown"
+                )
+                # Absolute completion time from pipeline start.
+                task_timings[task_name] = now - t0_pipeline
                 _record_artifact_from_task_output(
                     task_output, label, slug, output_dir, checkpoint, provider,
                     vault_config=vault_cfg, product_slug=product_slug,
@@ -1218,11 +1220,15 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 
             def _task_callback(task_output):
                 now = time.monotonic()
-                task_name = getattr(task_output, "name", None) or type(
-                    getattr(task_output, "pydantic", None)
-                ).__name__
-                task_timings[task_name] = now - task_timings.get("_last_completion_at", t0_pipeline)
-                task_timings["_last_completion_at"] = now
+                task_name = (
+                    getattr(task_output, "name", None)
+                    or type(getattr(task_output, "pydantic", None)).__name__
+                    or "unknown"
+                )
+                # Absolute completion time from pipeline start.
+                # Under async execution, tasks complete out of order, so
+                # absolute timestamps let us see overlap vs sequential.
+                task_timings[task_name] = now - t0_pipeline
                 _record_artifact_from_task_output(
                     task_output, label, slug, output_dir, checkpoint, provider,
                     vault_config=vault_cfg, product_slug=product_slug,
@@ -1272,10 +1278,13 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     _print_cost_summary(result, checkpoint, output_dir)
 
     # Print per-task wall-clock breakdown (populated by task callbacks)
+    # Values are absolute completion timestamps from pipeline start.
     timings_display = {k: v for k, v in task_timings.items() if not k.startswith("_")}
     if timings_display:
-        print("\nPer-task elapsed (seconds):")
-        for name, sec in timings_display.items():
+        # Sort by completion time so the output reads chronologically.
+        sorted_items = sorted(timings_display.items(), key=lambda kv: kv[1])
+        print("\nPer-task completion time (seconds from pipeline start):")
+        for name, sec in sorted_items:
             print(f"  {name}:  {sec:.1f}s")
     print(f"\nTotal pipeline elapsed: {elapsed_pipeline:.1f}s")
 
