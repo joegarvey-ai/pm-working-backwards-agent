@@ -1279,14 +1279,32 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 
     # Print per-task wall-clock breakdown (populated by task callbacks)
     # Values are absolute completion timestamps from pipeline start.
+    # For tasks with human_input=True (research_brief, prfaq, design_brief,
+    # brd), we prefer the provider's llm_completion_at dict which captures
+    # LLM output-ready time BEFORE the human approval prompt, so the PM's
+    # review pause is NOT counted in the measured latency.
     timings_display = {k: v for k, v in task_timings.items() if not k.startswith("_")}
+    # Merge in provider LLM timestamps, keyed by artifact type.
+    # These map to task names via the handler registry.
+    artifact_to_task_name = {
+        "research_brief": "research_synthesis_task",
+        "prfaq": "generate_prfaq",
+        "design_brief": "generate_design_brief",
+        "brd": "generate_brd_chained",
+        "build_spec": "generate_build_spec_chained",
+    }
+    for artifact_type, monotonic_ts in provider.llm_completion_at.items():
+        task_name = artifact_to_task_name.get(artifact_type, artifact_type)
+        # Override the callback-captured time with the pre-prompt time.
+        timings_display[task_name] = monotonic_ts - t0_pipeline
+
     if timings_display:
         # Sort by completion time so the output reads chronologically.
         sorted_items = sorted(timings_display.items(), key=lambda kv: kv[1])
-        print("\nPer-task completion time (seconds from pipeline start):")
+        print("\nPer-task LLM completion time (seconds from pipeline start, review pauses excluded):")
         for name, sec in sorted_items:
             print(f"  {name}:  {sec:.1f}s")
-    print(f"\nTotal pipeline elapsed: {elapsed_pipeline:.1f}s")
+    print(f"\nTotal pipeline elapsed (includes review pauses): {elapsed_pipeline:.1f}s")
 
     # Append to usage_log.jsonl for trend analysis
     import json as _json

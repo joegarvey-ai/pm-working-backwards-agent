@@ -109,16 +109,15 @@ class PmAgentSystem:
     def research_agent(self) -> Agent:
         """Synthesis agent: merges external research and customer evidence.
 
-        This agent has no tools because the research_synthesis_task operates
-        only on prior-task outputs passed via context. The legacy name is
-        preserved for backward compatibility with callers that reference it.
+        This agent has no tools by design because the research_synthesis_task
+        operates only on prior-task outputs passed via context, and the task
+        description explicitly tells the agent it has no tools. The legacy
+        name is preserved for backward compatibility with callers that
+        reference it.
         """
         return Agent(
             config=self.agents_config["research_agent"],  # type: ignore[index]
-            tools=[
-                FileReaderTool(),
-                PriorArtSearchTool(),
-            ],
+            tools=[],
             llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )

@@ -99,6 +99,12 @@ class VaultCheckpointProvider(SyncHumanInputProvider):
         self.vault_config = vault_config
         self.product_slug = product_slug
         self.artifacts: dict[str, WrittenArtifact] = {}
+        # Records monotonic time at which each task's LLM output was handed
+        # back from CrewAI, BEFORE the human approval prompt runs. Populated
+        # in handle_feedback(). Keyed by artifact_type (e.g. "research_brief",
+        # "prfaq"). Callers can use this to measure LLM wall-clock time
+        # separately from human review pause time.
+        self.llm_completion_at: dict[str, float] = {}
 
     # ---- Protocol entrypoint ----
 
@@ -109,6 +115,11 @@ class VaultCheckpointProvider(SyncHumanInputProvider):
             # Fall through to CrewAI's default prompt so the PM still sees the output
             # and can approve or give feedback.
             return super().handle_feedback(formatted_answer, context)
+
+        # Record LLM completion time BEFORE prompting the PM. This excludes
+        # human review pause time from downstream latency measurements.
+        import time as _time
+        self.llm_completion_at[handler.artifact_type] = _time.monotonic()
 
         return self._run_checkpoint_loop(formatted_answer, parsed, handler, context)
 
