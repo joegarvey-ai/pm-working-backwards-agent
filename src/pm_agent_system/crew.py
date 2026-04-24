@@ -275,29 +275,23 @@ class PmAgentSystem:
             tasks.append(self.validate_input())
 
         # Task 1: External research (Tavily + CompetitiveIntel only)
-        # async_execution=True: runs in parallel with customer_evidence_task
-        # since they share no inputs. Synthesis task waits on both.
         external_task = Task(
             config=self.tasks_config["external_research_task"],  # type: ignore[index]
             output_pydantic=ExternalResearchOutput,
             context=tasks[-1:] if tasks else [],  # context from validation if present
             name="external_research_task",
-            async_execution=True,
         )
         tasks.append(external_task)
 
         # Task 2: Customer evidence (Dovetail only)
-        # async_execution=True: runs in parallel with external_research_task.
         evidence_task = Task(
             config=self.tasks_config["customer_evidence_task"],  # type: ignore[index]
             output_pydantic=CustomerEvidenceOutput,
             name="customer_evidence_task",
-            async_execution=True,
         )
         tasks.append(evidence_task)
 
         # Task 3: Synthesis (no tools, merges both into ResearchOutput)
-        # CrewAI auto-joins: this task waits for both async predecessors.
         synthesis_task = Task(
             config=self.tasks_config["research_synthesis_task"],  # type: ignore[index]
             output_pydantic=ResearchOutput,
