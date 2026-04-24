@@ -2085,6 +2085,83 @@ def cmd_view(args: argparse.Namespace) -> None:
         app.run()
 
 
+def cmd_feedback_status(args: argparse.Namespace) -> None:
+    """Print a dashboard of feedback items in the inbox."""
+    from pm_agent_system.feedback_inbox import load_all_feedback, get_inbox_dir
+    from collections import Counter
+
+    items = load_all_feedback()
+    inbox = get_inbox_dir()
+
+    if not items:
+        print(f"Feedback inbox: {inbox}")
+        print("  (empty)")
+        print()
+        print("To add a feedback item, create a markdown file in the inbox")
+        print("directory with YAML frontmatter. See docs or the planning doc")
+        print("'stakeholder_feedback_loop_plan' for the schema.")
+        return
+
+    # Apply status filter
+    show = (getattr(args, "show", None) or "open").lower()
+    if show == "all":
+        visible = items
+    else:
+        visible = [it for it in items if it.status == show]
+
+    # Counts across all items regardless of filter
+    counts = Counter(it.status for it in items)
+
+    print(f"Feedback inbox: {inbox}")
+    print(f"  Open:         {counts.get('open', 0)}")
+    print(f"  Incorporated: {counts.get('incorporated', 0)}")
+    print(f"  Rejected:     {counts.get('rejected', 0)}")
+    print(f"  Deferred:     {counts.get('deferred', 0)}")
+    print()
+
+    if not visible:
+        print(f"No items with status='{show}' to display.")
+        print(f"Use 'feedback status --show all' to see every item.")
+        return
+
+    print(f"Showing {len(visible)} item(s) with status='{show}':")
+    print()
+
+    # Optional artifact filter (only among visible items)
+    artifact_filter = getattr(args, "artifact", None)
+    if artifact_filter:
+        visible = [
+            it for it in visible
+            if any(impact.artifact == artifact_filter for impact in it.affects)
+        ]
+        if not visible:
+            print(f"  (no items affecting '{artifact_filter}')")
+            return
+
+    for it in visible:
+        affects_display = (
+            ", ".join(impact.artifact for impact in it.affects)
+            if it.affects
+            else "unclassified"
+        )
+        summary = it.summary or "(no summary)"
+        if len(summary) > 60:
+            summary = summary[:57] + "..."
+        print(f"  {it.id}")
+        print(f"    Source:  {it.source}")
+        print(f"    Affects: {affects_display}")
+        print(f"    Summary: {summary}")
+        if it.contradictions:
+            print(f"    Contradictions: {len(it.contradictions)}")
+        if it.research_gaps:
+            print(f"    Research gaps: {len(it.research_gaps)}")
+        if it.status == "rejected" and it.rejection_reason:
+            print(f"    Rejected: {it.rejection_reason}")
+        if it.status == "deferred" and it.defer_until:
+            print(f"    Deferred until: {it.defer_until}")
+        print()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pm_agent_system")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2245,6 +2322,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Port for --serve mode (default: 8000)",
     )
     p_view.set_defaults(func=cmd_view)
+
+    # ----- Feedback inbox (Wave 1: status only; classify/apply land in Wave 2) -----
+
+    p_feedback = sub.add_parser(
+        "feedback",
+        help="Manage the stakeholder feedback inbox (output/feedback/)",
+    )
+    feedback_sub = p_feedback.add_subparsers(dest="feedback_command", required=True)
+
+    p_fb_status = feedback_sub.add_parser(
+        "status",
+        help="Show the feedback inbox dashboard",
+    )
+    p_fb_status.add_argument(
+        "--show",
+        choices=["open", "incorporated", "rejected", "deferred", "all"],
+        default="open",
+        help="Which items to display (default: open)",
+    )
+    p_fb_status.add_argument(
+        "--artifact",
+        choices=["research_brief", "prfaq", "design_brief", "brd", "build_spec"],
+        help="Only show items affecting this artifact",
+    )
+    p_fb_status.set_defaults(func=cmd_feedback_status)
 
     return parser
 
