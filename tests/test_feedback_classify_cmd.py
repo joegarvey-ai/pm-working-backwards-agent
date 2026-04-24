@@ -68,6 +68,35 @@ def classified_item() -> FeedbackItem:
     )
 
 
+# ---------- Mock fixtures ----------
+#
+# TD11 note on CrewAI @crew decorator and mocking:
+#
+# PmAgentSystem.feedback_classify_crew is decorated with CrewAI's @crew,
+# which wraps the method in a descriptor. The descriptor's __get__ is
+# invoked every time `instance.feedback_classify_crew` is resolved, and
+# it returns a bound result that differs from a plain method reference.
+#
+# Standard mock.patch(
+#     "pm_agent_system.main.PmAgentSystem.feedback_classify_crew",
+#     return_value=mock,
+# )
+# did NOT work: the descriptor intercepted the call and raised "__get__".
+#
+# Workaround (below): patch.object with a plain replacement function.
+# The function's self parameter matches the decorator's expected shape
+# and bypasses the descriptor's __get__ path.
+#
+# Signal that this workaround may no longer be needed (or may have broken):
+# - Tests fail with "__get__" errors: the @crew decorator changed shape;
+#   investigate crewai.project.CrewBase.
+# - Tests silently pass without calling the mock: the @crew decorator no
+#   longer wraps the return value; the plain patch.object may now return
+#   the function itself instead of the mock; check test_..._kickoff_count
+#   assertions to verify actual test coverage.
+# If either signal fires, revisit this fixture.
+
+
 def _make_mock_kickoff_result(classification: FeedbackClassification) -> MagicMock:
     """Build a mock CrewOutput whose tasks_output[0].pydantic == classification."""
     mock_task_output = MagicMock()
@@ -297,3 +326,50 @@ class TestFeedbackClassifyCommand:
         args = argparse.Namespace(item="fb-does-not-exist", rerun=False)
         with pytest.raises(SystemExit):
             cmd_feedback_classify(args)
+
+    # ---------- TD4: status guard on --item ----------
+
+    def test_item_filter_aborts_on_non_open_without_rerun(
+        self, tmp_inbox, classified_item, mock_crew, capsys
+    ):
+        """--item fb-xxx on a non-open item aborts unless --rerun is set."""
+        classified_item.status = "incorporated"
+        write_feedback_item(classified_item)
+
+        mock_instance = mock_crew(FeedbackClassification())
+
+        from pm_agent_system.main import cmd_feedback_classify
+
+        args = argparse.Namespace(item=classified_item.id, rerun=False)
+        with pytest.raises(SystemExit):
+            cmd_feedback_classify(args)
+
+        captured = capsys.readouterr()
+        assert "incorporated" in captured.out
+        assert "Use --rerun" in captured.out
+        # Crew never kicked off
+        mock_instance.kickoff.assert_not_called()
+
+    def test_item_filter_reclassifies_non_open_with_rerun(
+        self, tmp_inbox, classified_item, mock_crew, capsys
+    ):
+        """--item fb-xxx --rerun on a non-open item reclassifies with a warning."""
+        classified_item.status = "rejected"
+        classified_item.rejection_reason = "Out of scope"
+        write_feedback_item(classified_item)
+
+        new_classification = FeedbackClassification(
+            affects=[ArtifactImpact(artifact="prfaq", confidence=0.7)],
+        )
+        mock_instance = mock_crew(new_classification)
+
+        from pm_agent_system.main import cmd_feedback_classify
+
+        args = argparse.Namespace(item=classified_item.id, rerun=True)
+        cmd_feedback_classify(args)
+
+        captured = capsys.readouterr()
+        assert "Warning" in captured.out
+        assert "rejected" in captured.out
+        # Crew did kick off (reclassification ran)
+        mock_instance.kickoff.assert_called_once()

@@ -809,6 +809,7 @@ def _extract_agent_usage(result) -> dict[str, dict[str, int]]:
         "DesignBriefOutput": "Design Brief Agent",
         "BRDOutput": "BRD Agent",
         "CodingPromptOutput": "BRD Agent",  # build spec runs on the same agent
+        "FeedbackClassification": "Feedback Classifier",  # TD8
     }
 
     # Count how many tasks each agent ran
@@ -2180,11 +2181,24 @@ def cmd_feedback_classify(args: argparse.Namespace) -> None:
 
     # Resolve target items
     item_filter = getattr(args, "item", None)
+    rerun = getattr(args, "rerun", False)
     if item_filter:
         item = load_feedback_by_id(item_filter)
         if item is None:
             print(f"Error: feedback item not found: {item_filter}")
             sys.exit(1)
+        # TD4 fix: warn or abort on non-open items unless --rerun signals intent
+        if item.status != "open":
+            if not rerun:
+                print(
+                    f"Error: {item.id} has status '{item.status}', not 'open'. "
+                    f"Use --rerun to classify anyway."
+                )
+                sys.exit(1)
+            print(
+                f"Warning: {item.id} has status '{item.status}'. "
+                f"Reclassifying anyway (--rerun was set)."
+            )
         targets = [item]
     else:
         all_items = load_all_feedback()
@@ -2195,7 +2209,6 @@ def cmd_feedback_classify(args: argparse.Namespace) -> None:
         return
 
     # Filter already-classified unless --rerun
-    rerun = getattr(args, "rerun", False)
     if not rerun:
         before = len(targets)
         targets = [it for it in targets if not it.affects]
@@ -2269,28 +2282,27 @@ def cmd_feedback_classify(args: argparse.Namespace) -> None:
     total_elapsed = time.monotonic() - t_start
 
     # Routing table
+    # TD7 fix: use the in-memory `item` objects (already updated in the
+    # loop above) instead of re-reading from disk per item.
     print("\nRouting summary:")
     print("-" * 70)
     for item in targets:
-        fresh = load_feedback_by_id(item.id)
-        if fresh is None:
-            continue
-        if fresh.affects:
+        if item.affects:
             artifacts = ", ".join(
                 f"{imp.artifact} ({', '.join(imp.sections)})" if imp.sections else imp.artifact
-                for imp in fresh.affects
+                for imp in item.affects
             )
         else:
             artifacts = "(no artifacts affected)"
-        print(f"  {fresh.id} ({fresh.source}):")
+        print(f"  {item.id} ({item.source}):")
         print(f"    Affects: {artifacts}")
-        if fresh.contradictions:
-            print(f"    Contradictions: {len(fresh.contradictions)}")
-            for flag in fresh.contradictions:
+        if item.contradictions:
+            print(f"    Contradictions: {len(item.contradictions)}")
+            for flag in item.contradictions:
                 print(f"      - {flag.summary} [conflicts with {flag.conflicts_with}]")
-        if fresh.research_gaps:
-            print(f"    Research gaps: {len(fresh.research_gaps)}")
-            for gap in fresh.research_gaps:
+        if item.research_gaps:
+            print(f"    Research gaps: {len(item.research_gaps)}")
+            for gap in item.research_gaps:
                 print(f"      - [{gap.tool}] {gap.query}")
     print("-" * 70)
     print(f"Total classify time: {total_elapsed:.1f}s")
