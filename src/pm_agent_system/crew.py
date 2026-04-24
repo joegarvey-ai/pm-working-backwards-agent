@@ -381,6 +381,7 @@ class PmAgentSystem:
             config=self.tasks_config["generate_prfaq"],  # type: ignore[index]
             output_pydantic=PRFAQOutput,
             context=[tasks[-1]],  # research_task is always last
+            name="generate_prfaq",
         )
         tasks.append(prfaq_task)
         return Crew(
@@ -436,6 +437,7 @@ class PmAgentSystem:
             config=self.tasks_config["generate_prfaq"],  # type: ignore[index]
             output_pydantic=PRFAQOutput,
             context=[research],
+            name="generate_prfaq",
         )
 
         design_task: Task | None = None
@@ -444,6 +446,7 @@ class PmAgentSystem:
                 config=self.tasks_config["generate_design_brief"],  # type: ignore[index]
                 output_pydantic=DesignBriefOutput,
                 context=[research, prfaq_task],
+                name="generate_design_brief",
             )
 
         brd_context = [research, prfaq_task]
@@ -453,11 +456,13 @@ class PmAgentSystem:
             config=self.tasks_config["generate_brd_chained"],  # type: ignore[index]
             output_pydantic=BRDOutput,
             context=brd_context,
+            name="generate_brd_chained",
         )
         spec_task = Task(
             config=self.tasks_config["generate_build_spec_chained"],  # type: ignore[index]
             output_pydantic=CodingPromptOutput,
             context=[brd_task],
+            name="generate_build_spec_chained",
         )
 
         tasks.append(prfaq_task)
@@ -492,6 +497,7 @@ class PmAgentSystem:
             config=self.tasks_config["generate_build_spec_chained"],  # type: ignore[index]
             output_pydantic=CodingPromptOutput,
             context=[brd_task],
+            name="generate_build_spec_chained",
         )
         return Crew(
             agents=[self.brd_agent()],
