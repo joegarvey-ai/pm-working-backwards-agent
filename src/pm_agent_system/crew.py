@@ -7,6 +7,7 @@ from pm_agent_system.models import (
     CustomerEvidenceOutput,
     DesignBriefOutput,
     ExternalResearchOutput,
+    FeedbackClassification,
     PRFAQOutput,
     ResearchOutput,
 )
@@ -228,6 +229,31 @@ class PmAgentSystem:
                 FileReaderTool(),
             ],
             llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
+    @agent
+    def feedback_classifier_agent(self) -> Agent:
+        """Stakeholder feedback routing specialist (Wave 2).
+
+        Reads a single feedback item plus short summaries of each
+        current artifact, returns a FeedbackClassification with affected
+        artifacts, contradictions, and research gaps. Does not revise
+        content; only classifies.
+
+        Narrow tool set: file_reader only. No Tavily, Dovetail, or
+        style guide loader. The summaries are pre-computed by the
+        caller and passed in via task inputs, so the classifier does
+        not need to fetch anything.
+        """
+        # Smaller max_tokens because classifier output is a compact JSON
+        # blob (rarely more than a few hundred tokens).
+        return Agent(
+            config=self.agents_config["feedback_classifier_agent"],  # type: ignore[index]
+            tools=[
+                FileReaderTool(),
+            ],
+            llm=_llm(_DEFAULT_MAX_TOKENS),
             verbose=True,
         )
 
@@ -641,6 +667,30 @@ class PmAgentSystem:
         return Crew(
             agents=[self.brd_agent()],
             tasks=[structure_task, format_task],
+            process=Process.sequential,
+            verbose=True,
+        )
+
+    def feedback_classify_crew(self) -> Crew:
+        """Single-task crew that classifies one feedback item (Wave 2).
+
+        Inputs provided via kickoff(inputs=...) must include:
+            feedback_id, feedback_source, feedback_body,
+            research_brief_summary, prfaq_summary, design_brief_summary,
+            brd_summary, build_spec_summary, other_feedback_summaries
+
+        Returns a CrewOutput whose tasks_output[0].pydantic is a
+        FeedbackClassification instance.
+        """
+        classify_task = Task(
+            config=self.tasks_config["feedback_classify_task"],  # type: ignore[index]
+            output_pydantic=FeedbackClassification,
+            name="feedback_classify_task",
+            agent=self.feedback_classifier_agent(),
+        )
+        return Crew(
+            agents=[self.feedback_classifier_agent()],
+            tasks=[classify_task],
             process=Process.sequential,
             verbose=True,
         )

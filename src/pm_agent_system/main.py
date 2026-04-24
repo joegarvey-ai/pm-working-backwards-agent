@@ -2162,6 +2162,140 @@ def cmd_feedback_status(args: argparse.Namespace) -> None:
         print()
 
 
+def cmd_feedback_classify(args: argparse.Namespace) -> None:
+    """Run the feedback classifier on open items in the inbox.
+
+    Reads each unclassified open item (or all open items if --rerun),
+    invokes the classifier crew with artifact summaries and other
+    feedback summaries, writes the classification back to the item's
+    YAML frontmatter, and prints a routing table.
+    """
+    from pm_agent_system.feedback_inbox import (
+        load_all_feedback,
+        load_feedback_by_id,
+        write_feedback_item,
+    )
+    from pm_agent_system.artifact_summary import read_all_summaries
+    from pm_agent_system.models import FeedbackClassification
+
+    # Resolve target items
+    item_filter = getattr(args, "item", None)
+    if item_filter:
+        item = load_feedback_by_id(item_filter)
+        if item is None:
+            print(f"Error: feedback item not found: {item_filter}")
+            sys.exit(1)
+        targets = [item]
+    else:
+        all_items = load_all_feedback()
+        targets = [it for it in all_items if it.status == "open"]
+
+    if not targets:
+        print("No open feedback items to classify.")
+        return
+
+    # Filter already-classified unless --rerun
+    rerun = getattr(args, "rerun", False)
+    if not rerun:
+        before = len(targets)
+        targets = [it for it in targets if not it.affects]
+        skipped = before - len(targets)
+        if skipped and not targets:
+            print(f"All {skipped} open item(s) are already classified.")
+            print("Use --rerun to reclassify them.")
+            return
+        if skipped:
+            print(f"Skipping {skipped} already-classified item(s). "
+                  f"Use --rerun to include them.")
+
+    print(f"\nClassifying {len(targets)} feedback item(s)...\n")
+
+    # Pre-compute artifact summaries once (shared across all items)
+    summaries = read_all_summaries()
+
+    # Build "other feedback summaries" context once (used per-item with
+    # the current item excluded at call time)
+    all_open = load_all_feedback()
+    all_open_by_id = {it.id: it for it in all_open if it.status == "open"}
+
+    t_start = time.monotonic()
+
+    for idx, item in enumerate(targets, 1):
+        print(f"[{idx}/{len(targets)}] Classifying {item.id} from {item.source}...")
+
+        # Build other-feedback context, excluding the current item
+        other_lines = []
+        for other_id, other in all_open_by_id.items():
+            if other_id == item.id:
+                continue
+            other_summary = other.summary or "(no summary)"
+            other_lines.append(f"- {other_id} ({other.source}): {other_summary}")
+        other_feedback_summaries = (
+            "\n".join(other_lines) if other_lines else "(none)"
+        )
+
+        crew_inputs = {
+            "feedback_id": item.id,
+            "feedback_source": item.source,
+            "feedback_body": item.raw_text or "(no body provided)",
+            "research_brief_summary": summaries.get("research_brief", "") or "(no research brief yet)",
+            "prfaq_summary": summaries.get("prfaq", "") or "(no PRFAQ yet)",
+            "design_brief_summary": summaries.get("design_brief", "") or "(no design brief yet)",
+            "brd_summary": summaries.get("brd", "") or "(no BRD yet)",
+            "build_spec_summary": summaries.get("build_spec", "") or "(no build spec yet)",
+            "other_feedback_summaries": other_feedback_summaries,
+        }
+
+        t0 = time.monotonic()
+        try:
+            result = PmAgentSystem().feedback_classify_crew().kickoff(inputs=crew_inputs)
+        except Exception as exc:
+            print(f"  Error classifying {item.id}: {exc}")
+            continue
+        elapsed = time.monotonic() - t0
+
+        classification = extract_pydantic_output(result, FeedbackClassification)
+        if classification is None:
+            print(f"  Classifier returned invalid output for {item.id}; skipping")
+            continue
+
+        # Copy classifier output back onto the item
+        item.affects = classification.affects
+        item.research_gaps = classification.research_gaps
+        item.contradictions = classification.contradictions
+        write_feedback_item(item)
+        print(f"  Done in {elapsed:.1f}s")
+
+    total_elapsed = time.monotonic() - t_start
+
+    # Routing table
+    print("\nRouting summary:")
+    print("-" * 70)
+    for item in targets:
+        fresh = load_feedback_by_id(item.id)
+        if fresh is None:
+            continue
+        if fresh.affects:
+            artifacts = ", ".join(
+                f"{imp.artifact} ({', '.join(imp.sections)})" if imp.sections else imp.artifact
+                for imp in fresh.affects
+            )
+        else:
+            artifacts = "(no artifacts affected)"
+        print(f"  {fresh.id} ({fresh.source}):")
+        print(f"    Affects: {artifacts}")
+        if fresh.contradictions:
+            print(f"    Contradictions: {len(fresh.contradictions)}")
+            for flag in fresh.contradictions:
+                print(f"      - {flag.summary} [conflicts with {flag.conflicts_with}]")
+        if fresh.research_gaps:
+            print(f"    Research gaps: {len(fresh.research_gaps)}")
+            for gap in fresh.research_gaps:
+                print(f"      - [{gap.tool}] {gap.query}")
+    print("-" * 70)
+    print(f"Total classify time: {total_elapsed:.1f}s")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pm_agent_system")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2347,6 +2481,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only show items affecting this artifact",
     )
     p_fb_status.set_defaults(func=cmd_feedback_status)
+
+    p_fb_classify = feedback_sub.add_parser(
+        "classify",
+        help="Route each open feedback item to the artifacts it affects",
+    )
+    p_fb_classify.add_argument(
+        "--item",
+        help="Only classify a single feedback item by ID (e.g. fb-2026-04-24-001)",
+    )
+    p_fb_classify.add_argument(
+        "--rerun",
+        action="store_true",
+        help="Reclassify items that already have an 'affects' list populated",
+    )
+    p_fb_classify.set_defaults(func=cmd_feedback_classify)
 
     return parser
 

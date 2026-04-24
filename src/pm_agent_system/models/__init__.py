@@ -43,6 +43,7 @@ from pm_agent_system.models.feedback_item import (
     ResearchTool,
     VersionRef,
 )
+from pm_agent_system.models.feedback_classification import FeedbackClassification
 
 __all__ = [
     "ArtifactImpact",
@@ -62,6 +63,7 @@ __all__ = [
     "FeatureSpec",
     "FeedbackItem",
     "FeedbackStatus",
+    "FeedbackClassification",
     "FunctionalRequirement",
     "InternalStateAssessment",
     "MarketSizing",

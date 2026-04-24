@@ -1517,3 +1517,102 @@ generate_build_spec_standalone:
 
   agent: brd_agent
   human_input: true
+
+
+# ---------- Feedback classifier ----------
+# Wave 2 Day 1: classifier for the stakeholder feedback loop.
+# Runs once per feedback item (one LLM call per item, per the decision
+# in 2026-04-24_wave2_design_classifier_and_apply.md).
+
+feedback_classify_task:
+  description: >
+    Classify a single stakeholder feedback item by the artifacts and
+    sections it affects, surface contradictions with existing artifact
+    content or with other feedback items, and flag research gaps that
+    one of the three research tools (Tavily, CompetitiveIntel, Dovetail)
+    could fill.
+
+    You do NOT revise content. You only classify.
+
+    ## Inputs
+
+    **Feedback item ID:** {feedback_id}
+
+    **Feedback source:** {feedback_source}
+
+    **Feedback body:**
+    ```
+    {feedback_body}
+    ```
+
+    **Current artifact summaries** (empty means the artifact does not
+    yet exist on disk):
+
+    ### research_brief summary:
+    ```
+    {research_brief_summary}
+    ```
+
+    ### prfaq summary:
+    ```
+    {prfaq_summary}
+    ```
+
+    ### design_brief summary:
+    ```
+    {design_brief_summary}
+    ```
+
+    ### brd summary:
+    ```
+    {brd_summary}
+    ```
+
+    ### build_spec summary:
+    ```
+    {build_spec_summary}
+    ```
+
+    **Other open feedback items** (id, source, summary):
+    ```
+    {other_feedback_summaries}
+    ```
+
+    ## Process
+
+    1. Read the feedback body. Identify the topic in one phrase.
+    2. For each artifact that currently exists, decide whether the
+       feedback's topic affects content in that artifact. If yes, name
+       the specific sections (from the schema in your backstory). If no,
+       omit the artifact from the affects list.
+    3. Check whether the feedback contradicts any claim in the current
+       artifact summaries. Flag only unambiguous contradictions. If in
+       doubt, do NOT flag.
+    4. Check whether the feedback contradicts any other open feedback
+       item's stated position. Flag only unambiguous contradictions.
+    5. Check whether the feedback asks for data that tavily,
+       competitive_intel, or dovetail could fetch. If yes, name the tool
+       and write a scoped query string for the research supplement.
+    6. Return a FeedbackClassification JSON with the affects,
+       research_gaps, contradictions, and classifier_notes fields.
+
+    ## Rules
+
+    - Only name sections that exist in the artifact schema in your
+      backstory. Made-up section names are invalid.
+    - Confidence on each ArtifactImpact is 0.0 to 1.0. Below 0.5 means
+      do not flag; omit the artifact entirely.
+    - Empty artifact summaries mean that artifact does not exist yet.
+      Do not include empty-summary artifacts in the affects list.
+    - Return ONLY the FeedbackClassification JSON. No preamble, no
+      trailing commentary. Use classifier_notes for any caveats.
+
+  expected_output: >
+    A FeedbackClassification JSON with:
+    - affects: list of ArtifactImpact (may be empty)
+    - research_gaps: list of ResearchGap (may be empty)
+    - contradictions: list of ContradictionFlag (may be empty)
+    - classifier_notes: optional free-form notes
+
+  agent: feedback_classifier_agent
+  human_input: false
