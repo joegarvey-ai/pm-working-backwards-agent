@@ -1147,32 +1147,52 @@ brd_structure_task:
 
 brd_cost_risk_task:
   description: >
-    You have a completed BRDStructureOutput from the prior task. Now
-    produce the cost flags, risks, success metrics, timeline, and
-    version history.
+    Produce the cost flags, risks, success metrics, timeline, and
+    version history for a BRD. This task runs in PARALLEL with the
+    structure task, so you do NOT have access to structure's output.
 
     Use Tavily and the AWS pricing lookup tool to find real pricing
     data for cost-flagged decisions. Include specific per-unit prices.
 
     ## Inputs
 
+    **Approved PRFAQ file path:** {prfaq_path}
+    **Research brief file path:** {research_path}
+    **Known Constraints:** {known_constraints}
     **Business Context:** {business_context}
     **Success Metrics:** {success_metrics}
     **Timing:** {timing}
 
     ## Process
 
-    1. Review the BRDStructureOutput from the prior task context.
-    2. For each architectural decision with cost implications, use
+    1. Read the PRFAQ from {prfaq_path} using file_reader. Focus on:
+       - The solution overview and external FAQs for architectural
+         decisions that matter for cost (e.g., real-time requirements,
+         multi-region, storage footprint, LLM inference volume).
+       - The appendix_gaps for risks the PRFAQ has already surfaced.
+    2. If {research_path} is non-empty, read it with file_reader.
+       Focus on gaps_and_limitations for additional risks, and on
+       competitive analysis for architectural complexity signals.
+    3. For each architectural decision with cost implications, use
        aws_pricing_lookup or tavily_search to find real pricing.
-    3. Produce cost flags with decision, why_it_matters, tradeoff,
-       reference_url, and pricing_data.
-    4. Produce risks (2+) based on gaps from the PRFAQ and technical
-       complexity from the structure.
-    5. Produce success metrics using business_context as baseline
-       values and success_metrics as targets.
-    6. Produce timeline_and_milestones from the timing input.
-    7. Add version_history with v1.0, today's date, author "Agent 4".
+       Use product_family to narrow results for large services.
+    4. Produce cost flags with decision, why_it_matters, tradeoff,
+       reference_url, and pricing_data (raw pricing summary from
+       the pricing tool).
+    5. Produce risks (2+) sourced from:
+       - PRFAQ appendix_gaps
+       - Research gaps_and_limitations
+       - Technical complexity signals in the PRFAQ solution overview
+         (e.g., third-party integrations, strict latency targets,
+         multi-region requirements)
+       - PM known_constraints that create implementation risk
+       Each risk: description, likelihood (high/medium/low), impact,
+       mitigation.
+    6. Produce success metrics (1+) using business_context as baseline
+       values and success_metrics as targets. Each metric: metric name,
+       target_value, measurement_method, timeline.
+    7. Produce timeline_and_milestones from the timing input.
+    8. Add version_history with v1.0, today's date, author "Agent 4".
 
     ## Output
 
@@ -1182,10 +1202,11 @@ brd_cost_risk_task:
 
   expected_output: >
     A BRDCostRiskOutput JSON with cost_flags containing real pricing
-    data, risks (2+), success_metrics (1+) with baseline and target
-    values, timeline_and_milestones, and version_history starting at v1.0.
+    data, risks (2+) sourced from PRFAQ gaps and known_constraints,
+    success_metrics (1+) with baseline and target values,
+    timeline_and_milestones, and version_history starting at v1.0.
 
-  agent: brd_agent
+  agent: brd_cost_risk_agent
   human_input: false
 
 brd_assembly_task:

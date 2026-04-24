@@ -205,6 +205,32 @@ class PmAgentSystem:
             verbose=True,
         )
 
+    @agent
+    def brd_cost_risk_agent(self) -> Agent:
+        """Cost and risk specialist for the split BRD pipeline.
+
+        Runs in parallel with brd_agent on the structure task. Isolated
+        tool set and conversation state so that concurrent tool-use /
+        tool-result messages do not conflict (same pattern as 4A).
+
+        Tool set is narrow: Tavily and AWS pricing for cost lookups,
+        AWS docs for service reference, file_reader to read PRFAQ and
+        research from disk (since this task runs in parallel with
+        structure, it cannot reach them via task context).
+        """
+        return Agent(
+            config=self.agents_config["brd_cost_risk_agent"],  # type: ignore[index]
+            tools=[
+                TavilySearchTool(),
+                AWSPricingTool(),
+                AWSDocsSearchTool(),
+                AWSDocsReadTool(),
+                FileReaderTool(),
+            ],
+            llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
     # ---------- Tasks ----------
 
     @task
@@ -426,10 +452,13 @@ class PmAgentSystem:
     def full_pipeline_crew(
         self, skip_validation: bool = False, skip_design: bool = False
     ) -> Crew:
-        """Agent 1 → Agent 2 → Agent 3 (optional) → Agent 4.
+        """Agent 1 → Agent 2 → Agent 3 (optional) → Agent 4 split.
 
         When ``skip_design`` is True, Agent 3 is omitted and the pipeline
         matches the original three-agent behavior exactly.
+
+        BRD uses the split topology (structure + cost_risk in parallel,
+        then assembly) to shave wall-clock time off the biggest stage.
         """
         tasks = self._research_tasks(skip_validation)
         research = tasks[-1]
@@ -449,19 +478,42 @@ class PmAgentSystem:
                 name="generate_design_brief",
             )
 
-        brd_context = [research, prfaq_task]
+        # Split BRD: structure + cost_risk in parallel, then assembly.
+        # Structure needs research + prfaq (+ optional design) via context.
+        # Cost_risk needs research + prfaq via context (so it can run in
+        # parallel without waiting for structure). Dedicated agents per
+        # task prevent Bedrock tool-use/tool-result interleaving.
+        brd_structure_context = [research, prfaq_task]
         if design_task is not None:
-            brd_context.append(design_task)
-        brd_task = Task(
-            config=self.tasks_config["generate_brd_chained"],  # type: ignore[index]
-            output_pydantic=BRDOutput,
-            context=brd_context,
-            name="generate_brd_chained",
+            brd_structure_context.append(design_task)
+        brd_structure_task = Task(
+            config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
+            output_pydantic=BRDStructureOutput,
+            context=brd_structure_context,
+            name="brd_structure_task",
+            agent=self.brd_agent(),
+            async_execution=True,
         )
+        brd_cost_risk_task = Task(
+            config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
+            output_pydantic=BRDCostRiskOutput,
+            context=[research, prfaq_task],
+            name="brd_cost_risk_task",
+            agent=self.brd_cost_risk_agent(),
+            async_execution=True,
+        )
+        brd_assembly_task = Task(
+            config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
+            output_pydantic=BRDOutput,
+            context=[brd_structure_task, brd_cost_risk_task],
+            name="brd_assembly_task",
+            agent=self.brd_agent(),
+        )
+
         spec_task = Task(
             config=self.tasks_config["generate_build_spec_chained"],  # type: ignore[index]
             output_pydantic=CodingPromptOutput,
-            context=[brd_task],
+            context=[brd_assembly_task],
             name="generate_build_spec_chained",
         )
 
@@ -475,8 +527,9 @@ class PmAgentSystem:
         if design_task is not None:
             tasks.append(design_task)
             agents_list.append(self.design_brief_agent())
-        tasks.extend([brd_task, spec_task])
+        tasks.extend([brd_structure_task, brd_cost_risk_task, brd_assembly_task, spec_task])
         agents_list.append(self.brd_agent())
+        agents_list.append(self.brd_cost_risk_agent())
 
         return Crew(
             agents=agents_list,
@@ -509,30 +562,41 @@ class PmAgentSystem:
     def split_brd_crew(self) -> Crew:
         """Agent 4 only — three-task split BRD from approved PRFAQ on disk.
 
-        Task 1: produce BRDStructureOutput (prose, user stories, requirements).
-        Task 2: produce BRDCostRiskOutput (cost flags, risks, metrics).
+        Task 1 (structure) and Task 2 (cost_risk) run in PARALLEL via
+        async_execution=True. Each has its own dedicated agent to
+        avoid Bedrock tool-use/tool-result interleaving (same pattern
+        as 4A). Task 3 (assembly) waits on both and merges into the
+        final BRDOutput.
+
+        Task 1: BRDStructureOutput (prose, user stories, requirements).
+        Task 2: BRDCostRiskOutput (cost flags, risks, metrics, timeline).
         Task 3: merge both into final BRDOutput.
-        Avoids Bedrock read timeouts by keeping each task under 16K tokens.
         """
         structure_task = Task(
             config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
             output_pydantic=BRDStructureOutput,
             name="brd_structure_task",
+            agent=self.brd_agent(),
+            async_execution=True,
         )
         cost_risk_task = Task(
             config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
             output_pydantic=BRDCostRiskOutput,
-            context=[structure_task],
+            # No context=[structure_task]: cost_risk now reads PRFAQ and
+            # research from disk directly so it can run in parallel.
             name="brd_cost_risk_task",
+            agent=self.brd_cost_risk_agent(),
+            async_execution=True,
         )
         assembly_task = Task(
             config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
             output_pydantic=BRDOutput,
             context=[structure_task, cost_risk_task],
             name="brd_assembly_task",
+            agent=self.brd_agent(),
         )
         return Crew(
-            agents=[self.brd_agent()],
+            agents=[self.brd_agent(), self.brd_cost_risk_agent()],
             tasks=[structure_task, cost_risk_task, assembly_task],
             process=Process.sequential,
             verbose=True,

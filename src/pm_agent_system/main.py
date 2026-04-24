@@ -1290,7 +1290,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         "research_brief": "research_synthesis_task",
         "prfaq": "generate_prfaq",
         "design_brief": "generate_design_brief",
-        "brd": "generate_brd_chained",
+        "brd": "brd_assembly_task",
         "build_spec": "generate_build_spec_chained",
     }
     for artifact_type, monotonic_ts in provider.llm_completion_at.items():
