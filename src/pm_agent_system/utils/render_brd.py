@@ -1,7 +1,19 @@
 from datetime import date
 
 from pm_agent_system.models import BRDOutput
+from pm_agent_system.models.brd_output import DataHandlingSection
+from pm_agent_system.models.compliance_primitives import (
+    ComplianceGate,
+    LaunchReadinessItem,
+    PrivacyConsiderations,
+)
 from pm_agent_system.output_inspector import find_defaulted_empty_fields, format_warning_block
+
+_GAP_NOTICE_BLOCKQUOTE = (
+    "> Data handling section flagged as a gap. Upstream PRFAQ did not "
+    "include enough detail to enumerate data elements. See PRFAQ "
+    "appendix_gaps."
+)
 
 
 def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
@@ -9,6 +21,116 @@ def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
     for row in rows:
         clean = [str(c).replace("\n", " ").replace("|", "\\|") for c in row]
         lines.append("| " + " | ".join(clean) + " |")
+    return lines
+
+
+def _render_data_handling_section(section: DataHandlingSection) -> list[str]:
+    """Render BRD section 13 (Data Handling) including gap notice or elements table."""
+    lines: list[str] = ["## 13. Data Handling", ""]
+    if section.gap_flag:
+        lines.append(_GAP_NOTICE_BLOCKQUOTE)
+        lines.append("")
+        return lines
+    classification_value = (
+        section.dataset_classification.value
+        if section.dataset_classification is not None
+        else "Not specified"
+    )
+    lines.append(f"**Dataset Classification:** {classification_value}")
+    lines.append("")
+    if section.elements:
+        rows = [
+            [el.name, el.classification.value, el.purpose]
+            for el in section.elements
+        ]
+        lines += _table(["Element", "Classification", "Purpose"], rows)
+        lines.append("")
+    return lines
+
+
+def _render_vendor_considerations(
+    vendor_considerations: str, scenarios_applied: list[str]
+) -> list[str]:
+    """Render BRD section 14 (Vendor Considerations) with explicit no-third-party fallback."""
+    lines: list[str] = ["## 14. Vendor Considerations", ""]
+    if scenarios_applied:
+        lines.append(f"Scenarios applied: {', '.join(scenarios_applied)}.")
+        lines.append("")
+        lines.append(vendor_considerations)
+    else:
+        lines.append(
+            "No third party is involved in this product. Vendor review, "
+            "contract review, and procurement review are not required."
+        )
+    lines.append("")
+    return lines
+
+
+def _render_privacy_considerations(privacy: PrivacyConsiderations) -> list[str]:
+    """Render BRD section 15 (Privacy Considerations) with risks, mitigations, and flag."""
+    lines: list[str] = ["## 15. Privacy Considerations", ""]
+    lines.append(f"**Design review flag:** {str(privacy.design_review_flag).lower()}")
+    lines.append("")
+    lines.append("Risks:")
+    if privacy.risks:
+        for risk in privacy.risks:
+            lines.append(f"- {risk}")
+    else:
+        lines.append("- None recorded.")
+    lines.append("")
+    lines.append("Mitigations:")
+    if privacy.mitigations:
+        for mitigation in privacy.mitigations:
+            lines.append(f"- {mitigation}")
+    else:
+        lines.append("- None recorded.")
+    lines.append("")
+    return lines
+
+
+def _render_compliance_gates(gates: list[ComplianceGate]) -> list[str]:
+    """Render BRD section 16 (Compliance Gates) as a bulleted list or a fallback line."""
+    lines: list[str] = ["## 16. Compliance Gates", ""]
+    if not gates:
+        lines.append("No compliance gates recorded.")
+    else:
+        for gate in gates:
+            lines.append(f"- {gate.name}. {gate.note} Owner: {gate.owner.value}.")
+    lines.append("")
+    return lines
+
+
+def _render_launch_readiness_checklist(items: list[LaunchReadinessItem]) -> list[str]:
+    """Render BRD section 17 (Launch Readiness Checklist) as a markdown table or fallback."""
+    lines: list[str] = ["## 17. Launch Readiness Checklist", ""]
+    if not items:
+        lines.append("No launch readiness items recorded.")
+        lines.append("")
+        return lines
+    rows = [
+        [
+            item.item,
+            item.applies_to,
+            item.gate_owner.value,
+            item.evidence_reference if item.evidence_reference else " ",
+        ]
+        for item in items
+    ]
+    lines += _table(
+        ["Item", "Applies To", "Gate Owner", "Evidence Reference"], rows
+    )
+    lines.append("")
+    return lines
+
+
+def _render_post_launch_maintenance(text: str) -> list[str]:
+    """Render BRD section 18 (Post-Launch Maintenance) verbatim or with a fallback line."""
+    lines: list[str] = ["## 18. Post-Launch Maintenance", ""]
+    if text:
+        lines.append(text)
+    else:
+        lines.append("No post-launch maintenance guidance recorded.")
+    lines.append("")
     return lines
 
 
@@ -157,5 +279,14 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
     vh_rows = [[v.version, v.date, v.author, v.changes] for v in output.version_history]
     lines += _table(["Version", "Date", "Author", "Changes"], vh_rows)
     lines.append("")
+
+    lines += _render_data_handling_section(output.data_handling_section)
+    lines += _render_vendor_considerations(
+        output.vendor_considerations, output.vendor_scenarios_applied
+    )
+    lines += _render_privacy_considerations(output.privacy_considerations)
+    lines += _render_compliance_gates(output.compliance_gates)
+    lines += _render_launch_readiness_checklist(output.launch_readiness_checklist)
+    lines += _render_post_launch_maintenance(output.post_launch_maintenance)
 
     return "\n".join(lines)
