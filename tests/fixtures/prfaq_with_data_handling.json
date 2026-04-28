@@ -1,0 +1,64 @@
+{
+  "press_release": "Today the platform team introduces the internal Preferences API, a shared service that stores per-user UI settings for in-house tools. Teams can now persist defaults like dashboard choice, theme, and timezone without building bespoke storage in each tool. 'Before the Preferences API, every internal tool reset my layout on login,' said one early pilot user. 'Now my setup follows me between tools and I stop losing context.' The service runs on API Gateway, Lambda, and DynamoDB, with access scoped to the calling user via Cognito. Teams integrate by calling a single GET and PUT endpoint and adopting a shared preference namespace. The platform team owns the service, publishes a short migration guide, and pilots with two tools before broader rollout. Adoption success is measured by tools integrated per quarter and by support tickets resolved without touching tool-local storage.",
+  "external_faqs": [
+    {
+      "question": "Who can use the Preferences API?",
+      "answer": "Any internal tool running inside the platform network, authenticating users through the shared Cognito user pool.",
+      "audience": "external"
+    },
+    {
+      "question": "What does the API store?",
+      "answer": "A small JSON object of UI settings per user, such as default dashboard, theme, and timezone. It does not store application data.",
+      "audience": "external"
+    },
+    {
+      "question": "How do I integrate?",
+      "answer": "Call GET /preferences to read and PUT /preferences to upsert. Both endpoints require a valid Cognito token and return JSON.",
+      "audience": "external"
+    }
+  ],
+  "internal_faqs": [
+    {
+      "question": "What is our diagnosis, guiding policy, and coherent actions?",
+      "answer": "Diagnosis: each internal tool reimplements preference storage, causing drift and repeated onboarding. Guiding policy: one shared preference store per user with a stable contract. Coherent actions: ship a thin API, pilot with two tools, publish a namespace convention, and review PRs that add new keys.",
+      "audience": "internal"
+    },
+    {
+      "question": "What are the biggest risks?",
+      "answer": "Adoption stalls if only one team integrates, and schema drift if each tool invents its own keys. Both risks are called out in the BRD with named mitigations.",
+      "audience": "internal"
+    },
+    {
+      "question": "Why build this in-house rather than buy?",
+      "answer": "The scope is small, usage is internal only, and no third-party vendor is needed. Running on the platform AWS account avoids an external data path for low-stakes settings.",
+      "audience": "internal"
+    },
+    {
+      "question": "How will we measure success?",
+      "answer": "Tools integrated per quarter and p95 latency on GET /preferences. Targets are documented in the BRD success metrics section.",
+      "audience": "internal"
+    },
+    {
+      "question": "What gaps remain?",
+      "answer": "We do not yet have signal on cross-region usage or on preference export for offboarding. Both are tracked as open questions in the appendix.",
+      "audience": "internal"
+    }
+  ],
+  "customer_experience_narrative": "An internal tool user opens the analytics dashboard on Monday morning. The tool reads their preferences through GET /preferences, and the dashboard loads with the user's saved timezone, default filter, and theme already applied. Later in the day the user opens a second in-house tool for on-call rotations. That tool also calls GET /preferences on load, and the same theme and timezone apply without any setup. When the user switches their theme in either tool, the tool sends a PUT /preferences call and the next tool they open reflects the change. A platform engineer adding a new internal tool wires the preferences client once, reads the namespace convention from the wiki, and ships without building any per-tool storage. Support tickets about lost settings drop because preferences follow the user across tools. On-call engineers watching the platform dashboards see a single panel for the Preferences API p95 latency and error rate, and they respond to regressions through the same alarms they already monitor.",
+  "data_handling": {
+    "elements": [
+      {
+        "name": "Preference namespace key",
+        "classification": "Public",
+        "purpose": "Identify which preference set a tool is reading or writing."
+      },
+      {
+        "name": "Cognito user identifier",
+        "classification": "Highly Confidential",
+        "purpose": "Scope preference records to the calling user."
+      }
+    ],
+    "gap_flag": false,
+    "gap_notes": []
+  }
+}

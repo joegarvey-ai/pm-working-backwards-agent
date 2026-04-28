@@ -1,0 +1,123 @@
+{
+  "executive_summary": "An internal API that stores per-user UI preferences for in-house tools. It lets teams persist settings like default dashboard, theme, and timezone across sessions without building bespoke storage in each tool.",
+  "problem_statement": "Internal tools each reimplement their own preference storage. Preferences do not carry across tools, onboarding is repetitive, and inconsistent defaults create support churn.",
+  "proposed_solution_overview": "Provide a shared preferences API behind API Gateway, backed by DynamoDB, with Cognito-authenticated access scoped to the calling user.\n\n```mermaid\nflowchart LR\n  Client --> APIGW[API Gateway]\n  APIGW --> Lambda[Preferences Lambda]\n  Lambda --> DDB[(DynamoDB)]\n```",
+  "user_stories": [
+    {
+      "id": "US-001",
+      "persona": "Internal tool user",
+      "action": "save my UI preferences once",
+      "outcome": "the same preferences apply when I open another in-house tool",
+      "priority": "P0",
+      "origin": "agent-generated",
+      "traceability": "PRFAQ FAQ #1"
+    },
+    {
+      "id": "US-002",
+      "persona": "Internal tool developer",
+      "action": "read and write user preferences through a shared API",
+      "outcome": "I do not reimplement storage in every new tool",
+      "priority": "P0",
+      "origin": "agent-generated",
+      "traceability": "PRFAQ FAQ #2"
+    },
+    {
+      "id": "US-003",
+      "persona": "Platform on-call",
+      "action": "view error rates for the preferences API",
+      "outcome": "I can respond to regressions before they reach users",
+      "priority": "P1",
+      "origin": "agent-generated",
+      "traceability": "PRFAQ FAQ #4"
+    }
+  ],
+  "functional_requirements": [
+    {
+      "id": "FR-001",
+      "description": "The system shall return the stored preferences object for the authenticated user on GET /preferences.",
+      "rationale": "Tools need a single read endpoint that returns the current preference set.",
+      "acceptance_criteria": [
+        "Given an authenticated user with saved preferences, when the client calls GET /preferences, then the API returns the stored object with HTTP 200."
+      ],
+      "related_user_stories": ["US-001", "US-002"],
+      "code_samples": [],
+      "origin": "agent-generated",
+      "traceability": "PRFAQ FAQ #2"
+    },
+    {
+      "id": "FR-002",
+      "description": "The system shall upsert preferences for the authenticated user on PUT /preferences.",
+      "rationale": "Tools need to persist changes without branching between create and update.",
+      "acceptance_criteria": [
+        "Given an authenticated user, when the client PUTs a valid preferences body, then the API returns HTTP 200 and the next GET reflects the new values."
+      ],
+      "related_user_stories": ["US-001"],
+      "code_samples": [],
+      "origin": "agent-generated",
+      "traceability": "PRFAQ FAQ #2"
+    },
+    {
+      "id": "FR-003",
+      "description": "The system shall reject unauthenticated requests with HTTP 401.",
+      "rationale": "Preferences are scoped per user and must not be readable or writable without a valid token.",
+      "acceptance_criteria": [
+        "Given a request without a valid Cognito token, when it reaches the preferences API, then the API returns HTTP 401 without invoking the Lambda handler."
+      ],
+      "related_user_stories": ["US-002"],
+      "code_samples": [],
+      "origin": "agent-generated",
+      "traceability": "PRFAQ FAQ #3"
+    }
+  ],
+  "non_functional_requirements": [
+    {
+      "id": "NFR-001",
+      "category": "performance",
+      "description": "GET /preferences p95 latency stays under 150 ms at 50 requests per second.",
+      "acceptance_criteria": [
+        "Given a synthetic 50 rps load test, when it runs for 10 minutes, then the p95 server-side latency stays below 150 ms."
+      ]
+    },
+    {
+      "id": "NFR-002",
+      "category": "security",
+      "description": "All traffic to the preferences API uses TLS 1.2 or higher.",
+      "acceptance_criteria": [
+        "Given a request on HTTP or TLS below 1.2, when it reaches API Gateway, then the request is refused."
+      ]
+    }
+  ],
+  "technical_context_and_dependencies": "Depends on the internal Cognito user pool and the platform DynamoDB account. No new upstream systems introduced.",
+  "cost_flags": [],
+  "risks": [
+    {
+      "description": "Adoption stalls if only one team integrates the new API.",
+      "likelihood": "medium",
+      "impact": "low",
+      "mitigation": "Pilot with two tools in the first milestone and publish a short migration guide."
+    },
+    {
+      "description": "Schema drift if each tool invents its own preference keys.",
+      "likelihood": "medium",
+      "impact": "medium",
+      "mitigation": "Document a shared preference namespace convention and review PRs that add new keys."
+    }
+  ],
+  "success_metrics": [
+    {
+      "metric": "Tools integrated with the preferences API",
+      "target_value": "3 tools within one quarter of launch",
+      "measurement_method": "Manual tracking in the platform team wiki",
+      "timeline": "Q+1 after launch"
+    }
+  ],
+  "timeline_and_milestones": "M1: API and Lambda in staging. M2: two pilot tools integrated. M3: production rollout.",
+  "version_history": [
+    {
+      "version": "1.0",
+      "date": "2025-01-15",
+      "author": "Agent 2",
+      "changes": "Initial BRD drafted from approved PRFAQ."
+    }
+  ]
+}
