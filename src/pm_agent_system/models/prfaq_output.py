@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from pm_agent_system.models.compliance_primitives import DataClassification
 from pm_agent_system.models.research_output import CustomerQuote
 
 
@@ -16,6 +17,22 @@ class VersionEntry(BaseModel):
     date: str
     author: str = Field(description='"Agent 2" or PM name')
     changes: str
+
+
+class PRFAQDataElement(BaseModel):
+    """A data element referenced in the PRFAQ data handling summary."""
+
+    name: str
+    classification: DataClassification
+    purpose: str = ""
+
+
+class PRFAQDataHandling(BaseModel):
+    """Data handling summary surfaced in the PRFAQ with optional gap flagging."""
+
+    elements: list[PRFAQDataElement] = Field(default_factory=list)
+    gap_flag: bool = False
+    gap_notes: list[str] = Field(default_factory=list)
 
 
 class PRFAQOutput(BaseModel):
@@ -57,3 +74,4 @@ class PRFAQOutput(BaseModel):
         default_factory=list,
         description='Version history entries. Each should include version, date, author, and changes.'
     )
+    data_handling: PRFAQDataHandling = Field(default_factory=PRFAQDataHandling)

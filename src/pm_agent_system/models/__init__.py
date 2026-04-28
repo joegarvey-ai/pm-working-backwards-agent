@@ -2,16 +2,27 @@ from pm_agent_system.models.brd_output import (
     BRDOutput,
     CodeSample,
     CostFlag,
+    DataHandlingSection,
     FunctionalRequirement,
     NonFunctionalRequirement,
     Risk,
     SuccessMetric,
     UserStory,
 )
+from pm_agent_system.models.brd_intermediate import (
+    BRDComplianceOutput,
+    ComplianceGate,
+    DataClassification,
+    DataElement,
+    GateOwner,
+    LaunchReadinessItem,
+    PrivacyConsiderations,
+)
 from pm_agent_system.models.coding_prompt_output import (
     VALID_TARGET_TOOLS,
     CodingPromptOutput,
     FeatureSpec,
+    RACIRow,
     UserFlow,
 )
 from pm_agent_system.models.design_brief_output import (
@@ -20,7 +31,13 @@ from pm_agent_system.models.design_brief_output import (
     DesignUserFlow,
     ScreenEntry,
 )
-from pm_agent_system.models.prfaq_output import FAQ, PRFAQOutput, VersionEntry
+from pm_agent_system.models.prfaq_output import (
+    FAQ,
+    PRFAQDataElement,
+    PRFAQDataHandling,
+    PRFAQOutput,
+    VersionEntry,
+)
 from pm_agent_system.models.research_output import (
     CompetitorAnalysis,
     CustomerQuote,
@@ -48,14 +65,19 @@ from pm_agent_system.models.feedback_classification import FeedbackClassificatio
 __all__ = [
     "ArtifactImpact",
     "ArtifactType",
+    "BRDComplianceOutput",
     "BRDOutput",
     "CodeSample",
     "CodingPromptOutput",
+    "ComplianceGate",
     "CompetitorAnalysis",
     "ContradictionFlag",
     "CostFlag",
     "CustomerQuote",
     "CustomerEvidenceOutput",
+    "DataClassification",
+    "DataElement",
+    "DataHandlingSection",
     "DesignBriefOutput",
     "DesignFlowStep",
     "DesignUserFlow",
@@ -65,11 +87,17 @@ __all__ = [
     "FeedbackStatus",
     "FeedbackClassification",
     "FunctionalRequirement",
+    "GateOwner",
     "InternalStateAssessment",
+    "LaunchReadinessItem",
     "MarketSizing",
     "NonFunctionalRequirement",
     "PainPoint",
+    "PRFAQDataElement",
+    "PRFAQDataHandling",
     "PRFAQOutput",
+    "PrivacyConsiderations",
+    "RACIRow",
     "ResearchGap",
     "ResearchOutput",
     "ResearchTool",

@@ -35,7 +35,7 @@ ui = ["textual>=1.0.0", "textual-serve>=1.1.0"]
 # dev group by default on your version). The legacy `test` optional
 # extra above is kept for backward compatibility with anyone still
 # running `uv pip install -e ".[test]"`.
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "hypothesis>=6.0"]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,12 @@
 from pydantic import BaseModel, Field
 
+from pm_agent_system.models.compliance_primitives import (
+    ComplianceGate,
+    DataClassification,
+    DataElement,
+    LaunchReadinessItem,
+    PrivacyConsiderations,
+)
 from pm_agent_system.models.prfaq_output import VersionEntry
 
 
@@ -101,6 +108,15 @@ class SuccessMetric(BaseModel):
     timeline: str
 
 
+class DataHandlingSection(BaseModel):
+    """Data elements, dataset classification, and any gap flag for the BRD."""
+
+    elements: list[DataElement] = Field(default_factory=list)
+    dataset_classification: DataClassification | None = None
+    gap_flag: bool = False
+    gap_notes: list[str] = Field(default_factory=list)
+
+
 class BRDOutput(BaseModel):
     executive_summary: str
     problem_statement: str
@@ -119,3 +135,16 @@ class BRDOutput(BaseModel):
     success_metrics: list[SuccessMetric] = Field(default_factory=list, min_length=1)
     timeline_and_milestones: str = Field(default="")
     version_history: list[VersionEntry] = Field(default_factory=list, min_length=1)
+    data_handling_section: DataHandlingSection = Field(
+        default_factory=DataHandlingSection
+    )
+    vendor_considerations: str = ""
+    vendor_scenarios_applied: list[str] = Field(default_factory=list)
+    privacy_considerations: PrivacyConsiderations = Field(
+        default_factory=PrivacyConsiderations
+    )
+    compliance_gates: list[ComplianceGate] = Field(default_factory=list)
+    launch_readiness_checklist: list[LaunchReadinessItem] = Field(
+        default_factory=list
+    )
+    post_launch_maintenance: str = ""

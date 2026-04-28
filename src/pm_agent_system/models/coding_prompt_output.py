@@ -27,6 +27,18 @@ class FeatureSpec(BaseModel):
     )
 
 
+class RACIRow(BaseModel):
+    """One role's RACI assignment for a compliance decision."""
+
+    role: str = Field(
+        description="Role label such as PM, Tech Lead, Engineer, Legal, Security, or Privacy"
+    )
+    responsible: bool = False
+    accountable: bool = False
+    consulted: bool = False
+    informed: bool = False
+
+
 class CodingPromptOutput(BaseModel):
     build_summary: str = Field(
         description="2-3 sentences: what to build, for whom, done condition"
@@ -50,4 +62,12 @@ class CodingPromptOutput(BaseModel):
     formatted_spec: str = Field(
         default="",
         description="The complete tool-specific output ready to paste or load into the chosen tool"
+    )
+    stride_stub: str = Field(
+        default="",
+        description="Rendered STRIDE markdown block. Populated deterministically by render_build_spec.py, not by the LLM."
+    )
+    raci_matrix: list[RACIRow] = Field(
+        default_factory=list,
+        description="Rendered RACI rows for compliance decisions. Populated deterministically by render_build_spec.py, not by the LLM."
     )

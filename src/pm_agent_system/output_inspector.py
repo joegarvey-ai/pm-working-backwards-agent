@@ -52,6 +52,23 @@ FIELD_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
+# Fields that are defaulted for backward compatibility and should not be
+# flagged as incomplete until their dedicated renderers are wired in.
+# Compliance fields land in the BRD renderer in a later task; until then,
+# an empty value means the feature is off, not truncated output.
+INCOMPLETENESS_SKIP_FIELDS: frozenset[str] = frozenset(
+    {
+        "vendor_considerations",
+        "vendor_scenarios_applied",
+        "compliance_gates",
+        "launch_readiness_checklist",
+        "post_launch_maintenance",
+        "data_handling_section",
+        "privacy_considerations",
+    }
+)
+
+
 def _has_default(field_info: FieldInfo) -> bool:
     """Check if a field was declared with a default or default_factory."""
     if field_info.default is not None and field_info.default != ...:
@@ -80,6 +97,8 @@ def find_defaulted_empty_fields(model_instance: BaseModel) -> list[str]:
     """
     empty_fields = []
     for field_name, field_info in type(model_instance).model_fields.items():
+        if field_name in INCOMPLETENESS_SKIP_FIELDS:
+            continue
         if _has_default(field_info):
             value = getattr(model_instance, field_name, None)
             if _is_empty(value):
