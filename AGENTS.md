@@ -20,6 +20,10 @@ A multi-agent CrewAI system that takes a PM's product problem statement and prod
 - Tools: `src/pm_agent_system/tools/`. Tavily, Dovetail, Obsidian, file readers, style guide loader.
 - Renderers: `src/pm_agent_system/utils/`. Convert Pydantic objects to markdown.
 
+## BRD pipeline architecture
+
+The BRD stage runs three async siblings in parallel (`brd_structure_task`, `brd_cost_risk_task`, `brd_compliance_task`). Their outputs merge into `BRDOutput` via `brd_assembly_task`. The compliance sibling handles data classification, vendor considerations, privacy, compliance gates, launch readiness, and post-launch maintenance. STRIDE threat-model stubs and RACI matrices render deterministically after the build spec, not by the LLM.
+
 ## Conventions
 
 - Python 3.11+. Use `uv`, not `pip`.

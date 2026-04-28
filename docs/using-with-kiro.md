@@ -38,6 +38,10 @@ Activate a specific skill by mentioning it in chat:
 
 You can also type `#research-agent`, `#prfaq-agent`, or `#brd-build-spec-agent` in chat to manually activate a skill.
 
+## BRD pipeline internals
+
+The BRD stage runs three async siblings in parallel (`brd_structure_task`, `brd_cost_risk_task`, `brd_compliance_task`). Their outputs merge into `BRDOutput` via `brd_assembly_task`. The compliance sibling handles data classification, vendor considerations, privacy, compliance gates, launch readiness, and post-launch maintenance. STRIDE threat-model stubs and RACI matrices render deterministically after the build spec, not by the LLM.
+
 ### Option 3: CLI Pipeline
 The Python CLI works from Kiro's terminal:
 ```
