@@ -16,6 +16,7 @@ from pm_agent_system.models.build_spec_intermediate import (
     FormattedSpecOutput,
 )
 from pm_agent_system.models.brd_intermediate import (
+    BRDComplianceOutput,
     BRDCostRiskOutput,
     BRDStructureOutput,
 )
@@ -228,6 +229,53 @@ class PmAgentSystem:
                 AWSDocsReadTool(),
                 FileReaderTool(),
             ],
+            llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
+    @agent
+    def brd_compliance_agent(self) -> Agent:
+        """Compliance specialist for the split BRD pipeline.
+
+        Runs as a third async sibling alongside brd_agent (structure)
+        and brd_cost_risk_agent (cost_risk). Isolated tool set and
+        conversation state so that concurrent tool-use / tool-result
+        messages do not conflict under async_execution.
+
+        Tool set is narrow: FileReaderTool is required for reading the
+        PRFAQ and research from disk, since this task runs in parallel
+        with structure and cannot reach them via task context.
+        TavilySearchTool is used for privacy-regulation lookups and is
+        only attached when TAVILY_API_KEY is present in the environment;
+        any skipped lookups are recorded as gaps. This agent does not
+        use Dovetail, AWS pricing, or AWS docs.
+        """
+        tools: list = [FileReaderTool()]
+        if os.getenv("TAVILY_API_KEY"):
+            tools.append(TavilySearchTool())
+        return Agent(
+            config=self.agents_config["brd_compliance_agent"],  # type: ignore[index]
+            tools=tools,
+            llm=_llm(_LARGE_MAX_TOKENS),
+            verbose=True,
+        )
+
+    @agent
+    def brd_assembly_agent(self) -> Agent:
+        """No-tools assembly specialist for the split BRD pipeline.
+
+        Merges three typed intermediates (structure, cost-risk,
+        compliance) into a single BRDOutput. This agent carries an
+        empty tool list on purpose, mirroring the research_agent
+        synthesis pattern: the three intermediates arrive via task
+        context, so no tool call is needed to produce the merged
+        output. A dedicated no-tools agent keeps conversation state
+        minimal, avoids reusing the tool-bearing brd_agent for a pure
+        merge, and protects latency as intermediate sizes grow.
+        """
+        return Agent(
+            config=self.agents_config["brd_assembly_agent"],  # type: ignore[index]
+            tools=[],
             llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )
@@ -528,12 +576,20 @@ class PmAgentSystem:
             agent=self.brd_cost_risk_agent(),
             async_execution=True,
         )
+        brd_compliance_task = Task(
+            config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
+            output_pydantic=BRDComplianceOutput,
+            context=[research, prfaq_task],
+            name="brd_compliance_task",
+            agent=self.brd_compliance_agent(),
+            async_execution=True,
+        )
         brd_assembly_task = Task(
             config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
             output_pydantic=BRDOutput,
-            context=[brd_structure_task, brd_cost_risk_task],
+            context=[brd_structure_task, brd_cost_risk_task, brd_compliance_task],
             name="brd_assembly_task",
-            agent=self.brd_agent(),
+            agent=self.brd_assembly_agent(),
         )
 
         spec_task = Task(
@@ -553,9 +609,11 @@ class PmAgentSystem:
         if design_task is not None:
             tasks.append(design_task)
             agents_list.append(self.design_brief_agent())
-        tasks.extend([brd_structure_task, brd_cost_risk_task, brd_assembly_task, spec_task])
+        tasks.extend([brd_structure_task, brd_cost_risk_task, brd_compliance_task, brd_assembly_task, spec_task])
         agents_list.append(self.brd_agent())
         agents_list.append(self.brd_cost_risk_agent())
+        agents_list.append(self.brd_compliance_agent())
+        agents_list.append(self.brd_assembly_agent())
 
         return Crew(
             agents=agents_list,
@@ -614,16 +672,30 @@ class PmAgentSystem:
             agent=self.brd_cost_risk_agent(),
             async_execution=True,
         )
+        compliance_task = Task(
+            config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
+            output_pydantic=BRDComplianceOutput,
+            # No context=[...]: compliance reads PRFAQ and research from
+            # disk via FileReaderTool so it can run in parallel.
+            name="brd_compliance_task",
+            agent=self.brd_compliance_agent(),
+            async_execution=True,
+        )
         assembly_task = Task(
             config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
             output_pydantic=BRDOutput,
-            context=[structure_task, cost_risk_task],
+            context=[structure_task, cost_risk_task, compliance_task],
             name="brd_assembly_task",
-            agent=self.brd_agent(),
+            agent=self.brd_assembly_agent(),
         )
         return Crew(
-            agents=[self.brd_agent(), self.brd_cost_risk_agent()],
-            tasks=[structure_task, cost_risk_task, assembly_task],
+            agents=[
+                self.brd_agent(),
+                self.brd_cost_risk_agent(),
+                self.brd_compliance_agent(),
+                self.brd_assembly_agent(),
+            ],
+            tasks=[structure_task, cost_risk_task, compliance_task, assembly_task],
             process=Process.sequential,
             verbose=True,
         )

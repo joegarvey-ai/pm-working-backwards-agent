@@ -1081,6 +1081,29 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     prfaq_downstream = "brd" if skip_design else "design_brief"
     brd_upstream = "prfaq" if skip_design else "design_brief"
 
+    # Mutable cell holding the live BRDOutput once the BRD task completes.
+    # Used by the build_spec handler below to append the deterministic STRIDE
+    # stub and RACI matrix to spec.formatted_spec before save and render.
+    brd_holder: dict[str, BRDOutput] = {}
+
+    def _make_build_spec_render(original_render_fn):
+        def _render(obj: CodingPromptOutput) -> str:
+            brd_obj = brd_holder.get("brd")
+            if brd_obj is not None:
+                try:
+                    from pm_agent_system.utils.render_build_spec import (
+                        _augment_spec_with_stride_raci,
+                    )
+                    _augment_spec_with_stride_raci(obj, brd_obj)
+                except Exception as exc:
+                    logger.warning("STRIDE and RACI augmentation skipped: %s", exc)
+            return original_render_fn(obj)
+        return _render
+
+    _build_spec_render_fn = _make_build_spec_render(
+        lambda obj: render_build_spec_to_markdown(obj, slug=slug)
+    )
+
     handlers = [
         ArtifactHandler(
             artifact_type="research_brief",
@@ -1132,7 +1155,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         ArtifactHandler(
             artifact_type="build_spec",
             pydantic_class=CodingPromptOutput,
-            render_fn=lambda obj: render_build_spec_to_markdown(obj, slug=slug),
+            render_fn=_build_spec_render_fn,
             save_output_fn=lambda md, obj: save_build_spec(md, obj.formatted_spec, label, target_tool),
             version="1.0",
             upstream="brd",
@@ -1188,6 +1211,10 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     or type(getattr(task_output, "pydantic", None)).__name__
                     or "unknown"
                 )
+                # Stash the BRDOutput so the build_spec render hook can append
+                # the deterministic STRIDE stub and RACI matrix before save.
+                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
+                    brd_holder["brd"] = task_output.pydantic
                 # Absolute completion time from pipeline start.
                 task_timings[task_name] = now - t0_pipeline
                 _record_artifact_from_task_output(
@@ -1226,6 +1253,10 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     or type(getattr(task_output, "pydantic", None)).__name__
                     or "unknown"
                 )
+                # Stash the BRDOutput so the build_spec render hook can append
+                # the deterministic STRIDE stub and RACI matrix before save.
+                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
+                    brd_holder["brd"] = task_output.pydantic
                 # Absolute completion time from pipeline start.
                 # Under async execution, tasks complete out of order, so
                 # absolute timestamps let us see overlap vs sequential.
@@ -1431,6 +1462,29 @@ def cmd_brd(args: argparse.Namespace) -> None:
 
     brd_upstream = "design_brief" if design_brief_path_arg else "prfaq"
 
+    # Mutable cell holding the live BRDOutput once the BRD task completes.
+    # Used by the build_spec handler below to append the deterministic STRIDE
+    # stub and RACI matrix to spec.formatted_spec before save and render.
+    brd_holder: dict[str, BRDOutput] = {}
+
+    def _make_build_spec_render(original_render_fn):
+        def _render(obj: CodingPromptOutput) -> str:
+            brd_obj = brd_holder.get("brd")
+            if brd_obj is not None:
+                try:
+                    from pm_agent_system.utils.render_build_spec import (
+                        _augment_spec_with_stride_raci,
+                    )
+                    _augment_spec_with_stride_raci(obj, brd_obj)
+                except Exception as exc:
+                    logger.warning("STRIDE and RACI augmentation skipped: %s", exc)
+            return original_render_fn(obj)
+        return _render
+
+    _build_spec_render_fn = _make_build_spec_render(
+        lambda obj: render_build_spec_to_markdown(obj, slug=slug)
+    )
+
     provider, token = _install_checkpoint_provider(
         handlers=[
             ArtifactHandler(
@@ -1447,7 +1501,7 @@ def cmd_brd(args: argparse.Namespace) -> None:
             ArtifactHandler(
                 artifact_type="build_spec",
                 pydantic_class=CodingPromptOutput,
-                render_fn=lambda obj: render_build_spec_to_markdown(obj, slug=slug),
+                render_fn=_build_spec_render_fn,
                 save_output_fn=lambda md, obj: save_build_spec(md, obj.formatted_spec, label, target_tool),
                 version="1.0",
                 upstream="brd",
@@ -1458,8 +1512,11 @@ def cmd_brd(args: argparse.Namespace) -> None:
     )
 
     def _task_callback(task_output):
-        # BRD needs Jira/Linear exports alongside the provider's disk writes
+        # BRD needs Jira/Linear exports alongside the provider's disk writes.
+        # We also stash the BRDOutput here so the build_spec render hook above
+        # can append STRIDE and RACI before the provider writes the spec.
         if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
+            brd_holder["brd"] = task_output.pydantic
             try:
                 save_brd_exports(task_output.pydantic, label)
             except Exception as exc:
@@ -1638,6 +1695,22 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
         target_tool=structure.target_tool,
         formatted_spec=fmt.formatted_spec if fmt else "",
     )
+
+    # Append deterministic STRIDE stub and RACI matrix after the LLM-produced
+    # formatted_spec. The standalone build-spec flow has no live BRDOutput on
+    # hand, so parse the three trigger signals out of the BRD markdown on disk.
+    from pm_agent_system.utils.render_build_spec import (
+        _augment_spec_with_stride_raci,
+        extract_brd_trigger_state,
+    )
+    try:
+        brd_markdown = brd_path.read_text(encoding="utf-8")
+        trigger_state = extract_brd_trigger_state(brd_markdown)
+        _augment_spec_with_stride_raci(spec, trigger_state)
+    except Exception as exc:
+        logger.warning(
+            "STRIDE and RACI augmentation skipped for %s: %s", brd_path.name, exc
+        )
 
     bs_record = provider.artifacts.get("build_spec")
     if bs_record is not None:
