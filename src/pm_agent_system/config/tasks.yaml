@@ -472,7 +472,49 @@ generate_prfaq:
 
     5. **Draft the PRFAQ** in the structure below.
 
-    6. **Return as a JSON object matching the PRFAQOutput schema.** Inline
+    6. **Enumerate data handling.** For every product interaction described
+       in the press release or the customer experience narrative, identify
+       each data element the product will collect, process, store, or
+       transmit. For each element, produce a PRFAQDataElement with these
+       fields:
+
+       - `name`: a short label for the element (for example, "User email",
+         "Session token", "Payload metadata").
+       - `classification`: exactly one of the five Data_Classification
+         values:
+           - Public. Information intended for public availability with
+             no restriction on disclosure.
+           - Confidential. General non-public information that requires
+             access control but has limited harm potential if disclosed.
+           - Highly Confidential. Non-public information whose disclosure
+             would cause notable harm to customers or the business.
+           - Restricted. Information whose disclosure would cause severe
+             harm or trigger regulatory or contractual exposure.
+           - Critical. Information whose disclosure or loss would cause
+             the highest severity impact, including legal, financial, or
+             safety consequences.
+       - `purpose`: one short phrase describing why the product handles
+         this element.
+
+       Populate these elements into `data_handling.elements`. Set
+       `data_handling.gap_flag` to False.
+
+       If the PM input and PRFAQ content contain NO information about
+       data handling, DO NOT fabricate elements. Instead:
+         - Set `data_handling.gap_flag = True`.
+         - Add an entry to `data_handling.gap_notes` naming what was
+           missing (for example, "PM input did not describe data
+           handling; BRD compliance task should flag this for stakeholder
+           follow-up").
+         - Leave `data_handling.elements` empty.
+         - Add a corresponding entry to `appendix_gaps` so the gap is
+           surfaced in the PRFAQ reviewer flow.
+
+       Ground every element in the press release, the customer experience
+       narrative, or the PM input. Do not fabricate data handling to
+       cover research gaps.
+
+    7. **Return as a JSON object matching the PRFAQOutput schema.** Inline
        `[source name](url)` citations belong inside text fields wherever a
        factual claim is made. Pydantic does not strip them.
 
@@ -1209,26 +1251,296 @@ brd_cost_risk_task:
   agent: brd_cost_risk_agent
   human_input: false
 
+brd_compliance_task:
+  description: >
+    Produce the compliance intermediate for a BRD. This task runs in
+    PARALLEL with the structure task and the cost-risk task, so you
+    do NOT have access to their outputs. Do not write BRD prose, user
+    stories, or functional requirements. Return a typed
+    BRDComplianceOutput only.
+
+    ## Inputs
+
+    **Feature / Idea Summary:** {feature_summary}
+
+    **Goals:** {goals}
+
+    **User Summary:** {user_summary}
+
+    **Known Constraints:** {known_constraints}
+
+    **Business Context:** {business_context}
+
+    **Approved PRFAQ file path:** {prfaq_path}
+
+    **Research brief file path (may be empty):** {research_path}
+
+    ## Process
+
+    1. **Read the PRFAQ.** Use the file_reader tool to load
+       {prfaq_path}. Focus on the data handling section and the
+       appendix_gaps.
+
+    2. **Read the research brief.** If {research_path} is non-empty,
+       load it via file_reader. Focus on gaps_and_limitations for
+       additional compliance-relevant signals.
+
+    3. **Enumerate data elements.** List each data element the
+       product will collect, process, store, or transmit. Ground every
+       element in the PRFAQ data handling section or the PM input. Do
+       not fabricate.
+
+    4. **Classify each element.** Assign each element one
+       Data_Classification value from the constrained set of five.
+       Use the values verbatim:
+         - Public. Information intended for public availability with
+           no restriction on disclosure.
+         - Confidential. General non-public information that requires
+           access control but has limited harm potential if disclosed.
+         - Highly Confidential. Non-public information whose disclosure
+           would cause notable harm to customers or the business.
+         - Restricted. Information whose disclosure would cause severe
+           harm or trigger regulatory or contractual exposure.
+         - Critical. Information whose disclosure or loss would cause
+           the highest severity impact, including legal, financial, or
+           safety consequences.
+
+    5. **Derive Dataset_Classification** as the highest element value,
+       using the order:
+       Public < Confidential < Highly Confidential < Restricted < Critical.
+       When data_elements is empty (gap case), set
+       dataset_classification to None.
+
+    6. **Detect vendor risk scenarios.** Evaluate the PRFAQ and PM
+       input against the seven generic categories below and record
+       which apply. Use these names verbatim in
+       vendor_scenarios_applied:
+         1. Data sharing. The product sends customer or internal data
+            to a third party, or receives such data from one.
+         2. Data handling. A third party stores, processes, or
+            transmits customer or internal data on our behalf.
+         3. Content hosting. A third party hosts user-generated or
+            product-generated content visible to customers.
+         4. Product development. A third party contributes to building
+            or extending the product, including code, models, or
+            components.
+         5. Environment connection. A third-party system connects to
+            our production or non-production environments.
+         6. SaaS usage. The product depends on a third-party SaaS
+            offering as a required runtime component.
+         7. Endorsement or referral. The product is promoted to, or
+            promotes, a third-party audience through contractual means.
+
+    7. **Produce vendor considerations.** If at least one scenario
+       applies, name contract review, security review expectations,
+       and data sharing boundaries in generic language. If no scenario
+       applies, state explicitly that no third party is involved.
+
+    8. **Produce privacy considerations.** Ground privacy risks in the
+       classifications from step 4. Propose mitigations covering:
+         - Encryption in transit (TLS 1.2 or higher).
+         - Encryption at rest via KMS-managed keys for payloads in
+           S3 and DynamoDB.
+         - Access controls enforced at API Gateway with Cognito-issued
+           tokens.
+         - Data minimization: only fields listed in the data handling
+           table are transmitted.
+         - Retention limits scoped to the operational window.
+       Set design_review_flag to True when any element at Confidential
+       or higher represents personal data.
+
+    9. **List compliance gates.** Include only gates that apply, drawn
+       from the constrained set of four:
+         - security review
+         - privacy review
+         - legal or contract review
+         - procurement review
+       For EVERY gate included, set ComplianceGate.note to the verbatim
+       string: "start early, run in parallel, do not launch with open Critical or High findings".
+       Do not describe the gates as a sequential chain. Assign each gate
+       an owner from the Gate_Owner enum (see step 10).
+
+    10. **Produce the launch readiness checklist.** A table with four
+        columns: Item, Applies To, Gate Owner, Evidence Reference.
+        Gate Owner values are restricted to the six-value enum:
+          - PM
+          - Tech Lead
+          - Engineer
+          - Legal
+          - Security
+          - Privacy
+        Include at minimum these six items:
+          - Data classification sign-off. Applies To: all data
+            elements. Gate Owner: PM. Evidence Reference: BRD data
+            handling section.
+          - Privacy mitigation sign-off. Applies To: elements at
+            Confidential and above. Gate Owner: Privacy. Evidence
+            Reference: BRD privacy considerations section.
+          - Security review status. Applies To: architecture and
+            integrations. Gate Owner: Security. Evidence Reference:
+            BRD technical context section.
+          - Monitoring or alarm setup. Applies To: production workload.
+            Gate Owner: Engineer. Evidence Reference: BRD non-functional
+            requirements. Use CloudWatch metrics and alarms.
+          - Runbook availability. Applies To: operational procedures.
+            Gate Owner: Tech Lead. Evidence Reference: runbook pointer
+            or empty.
+          - Rollback plan. Applies To: deployment scope. Gate Owner:
+            Tech Lead. Evidence Reference: BRD timeline section.
+        You may append additional rows when PRFAQ content implies
+        them, for example a procurement review row when SaaS usage
+        applies. Point Evidence Reference at a BRD section or PRFAQ
+        reference. Leave Evidence Reference empty when no evidence is
+        yet available rather than fabricating a link.
+
+    11. **Produce post-launch maintenance.** State the recertification
+        cadence for vendor access and data classifications in generic
+        framing. List triggers that require classification update:
+        addition of new data elements, change in data sources, change
+        in vendor scope. Reference the Launch Readiness Checklist rows
+        for runbook and ownership pointers.
+
+    12. **Handle gaps.** If the PRFAQ data handling section is missing
+        or empty, set data_handling_gap_flag to True, record a
+        descriptive entry in data_handling_gaps (for example "PRFAQ
+        did not include a data handling section"), leave data_elements
+        empty, leave dataset_classification as None, and do NOT
+        fabricate data elements. If the PM input file referenced by
+        the file_reader tool is missing, apply the same behavior and
+        record an entry naming the missing file. If the Tavily API
+        key is unset and a regulation lookup is needed, record the
+        attempted lookup as a gap and continue.
+
+    13. **Return as a BRDComplianceOutput JSON.**
+
+    ## Rules
+
+    - No em dashes as punctuation. Restructure the sentence.
+    - No contrast hooks such as "It's not X, it's Y".
+    - No rhetorical questions as section openers.
+    - No throat-clearing transitions.
+    - No hyperbole. Banned words: "robust", "comprehensive", "powerful",
+      "cutting-edge", "transformative", "game-changing", "revolutionary",
+      "best-in-class", "seamless", "incredibly", "significantly",
+      "essentially", "very", "really", "quite", "extremely", "strong",
+      "leverage", "synergies", "drive alignment", "holistic", "unlock",
+      "supercharge".
+    - AWS-first defaults for all technical references (Lambda, DynamoDB,
+      Cognito, API Gateway, S3, CloudFront, KMS, CloudWatch). Do not
+      reference Supabase, Firebase, Vercel, or other non-enterprise
+      services unless {known_constraints} explicitly requires them.
+    - "The system shall..." phrasing for any requirement-style statement.
+    - Zero organization-internal portal names, policy numbers, service
+      brands, or domain references anywhere in the output.
+    - No fabrication of data elements, vendor scenarios, compliance
+      gates, or checklist items.
+
+    ## Environment handling
+
+    - If the DOVETAIL_API_TOKEN environment variable is unset, this
+      task is unaffected. It does not call Dovetail.
+    - If the Tavily API key is unset, proceed using only the PRFAQ
+      and PM input. Record any attempted regulation lookups as gaps
+      in data_handling_gaps and continue.
+
+  expected_output: >
+    A BRDComplianceOutput JSON with data elements classified, dataset
+    classification derived, vendor considerations, privacy risks with
+    mitigations, applicable compliance gates with the start-early note,
+    launch readiness checklist with the minimum required items, and
+    post-launch maintenance section. Gap flag set when upstream input
+    is missing or insufficient, with no fabricated data elements.
+
+  agent: brd_compliance_agent
+  human_input: false
+
 brd_assembly_task:
   description: >
-    You have two completed outputs from prior tasks:
-    1. BRDStructureOutput (prose, user stories, requirements)
-    2. BRDCostRiskOutput (cost flags, risks, metrics, timeline)
+    You have three completed outputs from prior tasks, all produced in
+    parallel:
+    1. BRDStructureOutput (from brd_structure_task): executive_summary,
+       problem_statement, proposed_solution_overview, user_stories,
+       functional_requirements, non_functional_requirements, and
+       technical_context_and_dependencies.
+    2. BRDCostRiskOutput (from brd_cost_risk_task): cost_flags, risks,
+       success_metrics, timeline_and_milestones, and version_history.
+    3. BRDComplianceOutput (from brd_compliance_task): data_elements,
+       dataset_classification, vendor_considerations,
+       vendor_scenarios_applied, privacy_considerations,
+       compliance_gates, launch_readiness_checklist,
+       post_launch_maintenance, data_handling_gap_flag, and
+       data_handling_gaps.
 
-    Merge them into a single BRDOutput. You have NO tools. Do not
-    search for anything new. Work only from the prior task outputs.
+    Merge all three into a single BRDOutput. You have NO tools. Do not
+    search for anything new. Work only from the three prior task
+    outputs.
 
     Copy all fields directly. Do not modify acceptance criteria,
-    code samples, or pricing data. Preserve everything verbatim.
+    code samples, pricing data, data classifications, gate owners, or
+    checklist items. Preserve everything verbatim. Do not paraphrase,
+    reword, or reorder items inside any list.
+
+    ## Three-way merge
+
+    - Copy every BRDStructureOutput field into the matching BRDOutput
+      field as before.
+    - Copy every BRDCostRiskOutput field into the matching BRDOutput
+      field as before.
+    - Copy every BRDComplianceOutput field into the extended BRDOutput
+      fields using the mapping below. Every value is carried over
+      byte-identically.
+
+    ## Compliance field mapping (verbatim copy)
+
+    - BRDComplianceOutput.data_elements
+        -> BRDOutput.data_handling_section.elements
+    - BRDComplianceOutput.dataset_classification
+        -> BRDOutput.data_handling_section.dataset_classification
+    - BRDComplianceOutput.data_handling_gap_flag
+        -> BRDOutput.data_handling_section.gap_flag
+    - BRDComplianceOutput.data_handling_gaps
+        -> BRDOutput.data_handling_section.gap_notes
+    - BRDComplianceOutput.vendor_considerations
+        -> BRDOutput.vendor_considerations
+    - BRDComplianceOutput.vendor_scenarios_applied
+        -> BRDOutput.vendor_scenarios_applied
+    - BRDComplianceOutput.privacy_considerations
+        -> BRDOutput.privacy_considerations
+    - BRDComplianceOutput.compliance_gates
+        -> BRDOutput.compliance_gates
+    - BRDComplianceOutput.launch_readiness_checklist
+        -> BRDOutput.launch_readiness_checklist
+    - BRDComplianceOutput.post_launch_maintenance
+        -> BRDOutput.post_launch_maintenance
+
+    The dataset_classification value on the assembled
+    data_handling_section must match the compliance intermediate
+    exactly. When the intermediate reports it as None (gap case), it
+    stays None on the assembled output. Do not infer, re-derive, or
+    fill in a default.
+
+    ## Error behavior
+
+    If any one of the three intermediates is missing or fails
+    validation, raise an assembly error that names the missing or
+    invalid intermediate (BRDStructureOutput, BRDCostRiskOutput, or
+    BRDComplianceOutput). Do not emit a partial BRDOutput under any
+    condition. The CrewAI task-failure surface will carry the error
+    up to the operator.
 
     ## Output
 
-    Return a BRDOutput JSON with all 12 sections populated by
-    merging the two prior outputs.
+    Return a BRDOutput JSON with every section populated by merging
+    the three prior outputs per the mapping above. No new content is
+    generated.
 
   expected_output: >
-    A BRDOutput JSON with all fields populated from the two prior
-    task outputs. No new content generated.
+    A BRDOutput JSON with all fields populated from the three prior
+    task outputs (BRDStructureOutput, BRDCostRiskOutput, and
+    BRDComplianceOutput) per the compliance field mapping. No new
+    content generated. On a missing or invalid intermediate, the task
+    raises an assembly error naming the intermediate and emits no
+    partial output.
 
   agent: brd_agent
   human_input: true
