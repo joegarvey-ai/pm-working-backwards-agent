@@ -35,6 +35,10 @@ class ExternalResearchOutput(BaseModel):
         default_factory=list,
         description="Topics where external research found no data",
     )
+    internal_findings: list[str] = Field(
+        default_factory=list,
+        description="Findings from internal Amazon systems (wiki, code search, Taskei, Quip)",
+    )
 
 
 class CustomerEvidenceOutput(BaseModel):

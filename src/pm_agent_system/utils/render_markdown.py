@@ -135,4 +135,10 @@ def render_research_to_markdown(output: ResearchOutput) -> str:
         lines.append(f"- {src}")
     lines.append("")
 
+    if output.internal_sources:
+        lines.append("### Internal Sources")
+        for src in output.internal_sources:
+            lines.append(f"- {src}")
+        lines.append("")
+
     return "\n".join(lines)

@@ -107,3 +107,8 @@ class ResearchOutput(BaseModel):
     )
 
     sources: list[str] = Field(default_factory=list, description="All sources cited, for reference index")
+
+    internal_sources: list[str] = Field(
+        default_factory=list,
+        description="Sources retrieved from internal MCP, separate from public sources",
+    )

@@ -24,17 +24,21 @@ from pm_agent_system.tools import (
     AWSDocsReadTool,
     AWSDocsSearchTool,
     AWSPricingTool,
+    BuilderMCPTool,
     CompetitiveIntelTool,
     DovetailSearchTool,
     FileReaderTool,
     ObsidianReadTool,
     ObsidianSearchTool,
+    OutlookMCPTool,
     PriorArtSearchTool,
     RequirementsReaderTool,
     StyleGuideLoaderTool,
     TavilySearchTool,
 )
+import logging
 import os
+from pathlib import Path
 
 from crewai.llms.providers.anthropic.completion import AnthropicCompletion
 
@@ -85,6 +89,29 @@ def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS):
     return AnthropicCompletion(model=_MODEL_ANTHROPIC, max_tokens=max_tokens)
 
 
+logger = logging.getLogger(__name__)
+
+
+def _builder_mcp_enabled() -> bool:
+    """True when builder-mcp auth material is present."""
+    if os.getenv("BUILDER_MCP_TOKEN", "").strip():
+        return True
+    cookie_path = os.getenv("MIDWAY_COOKIE_PATH", "").strip()
+    if cookie_path and Path(cookie_path).exists():
+        return True
+    return False
+
+
+def _outlook_mcp_enabled() -> bool:
+    """True when outlook-mcp auth material is present."""
+    if os.getenv("OUTLOOK_MCP_TOKEN", "").strip():
+        return True
+    cookie_path = os.getenv("MIDWAY_COOKIE_PATH", "").strip()
+    if cookie_path and Path(cookie_path).exists():
+        return True
+    return False
+
+
 @CrewBase
 class PmAgentSystem:
     """PM Agent System crew.
@@ -104,6 +131,21 @@ class PmAgentSystem:
 
     agents_config = "config/agents.yaml"
     tasks_config = "config/tasks.yaml"
+
+    def __init__(self, *args, **kwargs):
+        # Note: do not call super().__init__() here. CrewBaseMeta's
+        # __call__ handles instance initialization. Calling super()
+        # triggers a TypeError in CrewAI 1.14+ because the metaclass
+        # changes the class hierarchy.
+        _dovetail = "enabled" if os.getenv("DOVETAIL_API_TOKEN", "").strip() else "disabled"
+        _builder = "enabled" if _builder_mcp_enabled() else "disabled"
+        _outlook = "enabled" if _outlook_mcp_enabled() else "disabled"
+        logger.info(
+            "Optional integrations: builder_mcp=%s, outlook_mcp=%s, dovetail=%s",
+            _builder,
+            _outlook,
+            _dovetail,
+        )
 
     # ---------- Agents ----------
 
@@ -131,16 +173,19 @@ class PmAgentSystem:
         Isolated from other research agents so that async_execution=True
         does not interleave tool-use/tool-result messages across agents.
         """
+        tools: list = [
+            TavilySearchTool(),
+            CompetitiveIntelTool(),
+            FileReaderTool(),
+            PriorArtSearchTool(),
+            ObsidianSearchTool(),
+            ObsidianReadTool(),
+        ]
+        if _builder_mcp_enabled():
+            tools.append(BuilderMCPTool())
         return Agent(
             config=self.agents_config["external_research_agent"],  # type: ignore[index]
-            tools=[
-                TavilySearchTool(),
-                CompetitiveIntelTool(),
-                FileReaderTool(),
-                PriorArtSearchTool(),
-                ObsidianSearchTool(),
-                ObsidianReadTool(),
-            ],
+            tools=tools,
             llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )
@@ -163,14 +208,17 @@ class PmAgentSystem:
 
     @agent
     def prfaq_agent(self) -> Agent:
+        tools: list = [
+            FileReaderTool(),
+            StyleGuideLoaderTool(),
+            ObsidianSearchTool(),
+            ObsidianReadTool(),
+        ]
+        if _outlook_mcp_enabled():
+            tools.append(OutlookMCPTool())
         return Agent(
             config=self.agents_config["prfaq_agent"],  # type: ignore[index]
-            tools=[
-                FileReaderTool(),
-                StyleGuideLoaderTool(),
-                ObsidianSearchTool(),
-                ObsidianReadTool(),
-            ],
+            tools=tools,
             llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )
@@ -190,19 +238,24 @@ class PmAgentSystem:
 
     @agent
     def brd_agent(self) -> Agent:
+        tools: list = [
+            TavilySearchTool(),
+            AWSPricingTool(),
+            AWSDocsSearchTool(),
+            AWSDocsReadTool(),
+            FileReaderTool(),
+            RequirementsReaderTool(),
+            StyleGuideLoaderTool(),
+            ObsidianSearchTool(),
+            ObsidianReadTool(),
+        ]
+        if _builder_mcp_enabled():
+            tools.append(BuilderMCPTool())
+        if _outlook_mcp_enabled():
+            tools.append(OutlookMCPTool())
         return Agent(
             config=self.agents_config["brd_agent"],  # type: ignore[index]
-            tools=[
-                TavilySearchTool(),
-                AWSPricingTool(),
-                AWSDocsSearchTool(),
-                AWSDocsReadTool(),
-                FileReaderTool(),
-                RequirementsReaderTool(),
-                StyleGuideLoaderTool(),
-                ObsidianSearchTool(),
-                ObsidianReadTool(),
-            ],
+            tools=tools,
             llm=_llm(_LARGE_MAX_TOKENS),
             verbose=True,
         )

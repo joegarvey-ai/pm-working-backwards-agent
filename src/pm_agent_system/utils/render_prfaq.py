@@ -52,6 +52,12 @@ def render_prfaq_to_markdown(output: PRFAQOutput, slug: str = "") -> str:
         lines.append(faq.answer)
         lines.append("")
 
+    # Design decision (internal-mcp-integration, Requirement 10.1):
+    # Outlook MCP stakeholder scheduling context flows through existing
+    # Internal FAQ entries. Agents thread the content into FAQ questions
+    # and answers at generation time. No new PRFAQOutput schema fields are
+    # introduced, so the renderer handles MCP-sourced content transparently
+    # via the same internal_faqs loop below.
     lines.append("## Internal FAQs")
     lines.append("")
     for faq in output.internal_faqs:

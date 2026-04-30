@@ -83,6 +83,13 @@ external_research_task:
       quite, extremely, strong, leverage, synergies, drive alignment,
       holistic, unlock, supercharge.
 
+    If the builder_mcp tool is available, use it alongside Tavily to
+    gather internal wiki pages, code search results, Taskei tickets,
+    and Quip documents related to {feature_summary}. Include any
+    internal findings in external_sources with an "[internal]" prefix.
+    If builder_mcp returns an error or is not available, note the
+    missing internal context in external_gaps and continue.
+
   expected_output: >
     An ExternalResearchOutput JSON object with market_sizing populated
     from real sources, competitors list with 3-5 entries including review
@@ -212,6 +219,12 @@ research_synthesis_task:
     - No banned words (same list as other tasks).
     - If business_context was provided, reference it in the executive
       summary and strategic implications.
+
+    If the ExternalResearchOutput contains internal findings from the
+    builder_mcp tool (entries prefixed with "[internal]"), carry them
+    into the merged ResearchOutput. Place internal findings in the
+    internal state assessment section alongside any PM-provided
+    internal_context. Do not discard internal evidence during merging.
 
   expected_output: >
     A ResearchOutput JSON object with all fields populated by merging
@@ -517,6 +530,12 @@ generate_prfaq:
     7. **Return as a JSON object matching the PRFAQOutput schema.** Inline
        `[source name](url)` citations belong inside text fields wherever a
        factual claim is made. Pydantic does not strip them.
+
+    If the outlook_mcp tool is available, use it to look up stakeholder
+    calendar data and scheduling context. Include relevant scheduling
+    findings in the Internal FAQ section when answering questions about
+    timeline, resourcing, or stakeholder availability. If the outlook_mcp
+    tool is not available, proceed without scheduling data.
 
     ## PRFAQ Structure
 
@@ -1172,6 +1191,14 @@ brd_structure_task:
     7. Include code samples (API contracts, schemas, Mermaid diagrams)
        in functional requirements.
 
+    If the builder_mcp tool is available, use it to search internal wiki
+    pages and code repositories for technical prior art and architecture
+    decisions related to {known_constraints}. Include relevant findings
+    in the technical context section. If the outlook_mcp tool is
+    available, use it to look up stakeholder availability for the
+    timeline. If either tool is not available or returns an error,
+    continue with the inputs already provided.
+
     ## Output
 
     Return a BRDStructureOutput JSON. Do NOT include cost_flags,
@@ -1622,6 +1649,14 @@ generate_brd_standalone:
        and do not reference screen names or flows.
 
     9. **Return as a JSON object matching the BRDOutput schema.**
+
+    If the builder_mcp tool is available, use it to search internal wiki
+    pages and code repositories for technical prior art and architecture
+    context. Include relevant findings in the technical context section.
+    If the outlook_mcp tool is available, use it to look up stakeholder
+    availability and factor it into the Timeline and Milestones section.
+    If either tool is not available or returns an error, continue with
+    the inputs already provided.
 
     ## BRD Structure (12 sections)
 

@@ -74,6 +74,14 @@ external_research_agent:
     You use the Tavily search tool for market data and the competitive
     intelligence tool for review platform data (G2, Capterra, TrustRadius).
     You do not use the Dovetail tool.
+
+    If the builder_mcp tool is available, use it to query internal wiki
+    pages, code repositories, Taskei tickets, and Quip documents for
+    context that public web searches cannot reach. Treat builder_mcp
+    results as internal evidence and include them in your output alongside
+    public findings. If the builder_mcp tool is not available or returns
+    an error, note the missing internal context in external_gaps and
+    continue with public sources only.
   verbose: true
   allow_delegation: false
 
@@ -161,6 +169,13 @@ prfaq_agent:
     Before you start writing, you call the style_guide_loader tool to load
     the live style guide from disk. The rules above are the floor; the
     style guide adds specificity. Apply both.
+
+    If the outlook_mcp tool is available, use it to look up stakeholder
+    calendar data and scheduling context. Include relevant scheduling
+    findings in the Internal FAQ section when answering questions about
+    timeline, resourcing, or stakeholder availability. If the outlook_mcp
+    tool is not available, proceed without scheduling data. Do not
+    fabricate availability information.
   verbose: true
   allow_delegation: false
 
@@ -594,6 +609,19 @@ brd_agent:
       prompt similar to the prompts in the project's Claude Code Prompts
       folder. Cursor gets a composer-ready prompt. Lovable gets a natural
       language Agent Mode description.
+
+    If the builder_mcp tool is available, use it to search internal wiki
+    pages and code repositories for technical prior art and architecture
+    context that public documentation does not cover. Include relevant
+    findings in the technical context section. If the builder_mcp tool is
+    not available or returns an error, note the gap in the risks section
+    and continue with public sources only.
+
+    If the outlook_mcp tool is available, use it to look up stakeholder
+    calendar data for the Timeline and Milestones section. Factor
+    scheduling constraints into milestone dates when the data is present.
+    If the outlook_mcp tool is not available, proceed without stakeholder
+    availability data.
   verbose: true
   allow_delegation: false
 feedback_classifier_agent:

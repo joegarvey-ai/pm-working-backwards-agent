@@ -217,6 +217,12 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
         lines.append("_Not generated in this run._")
     lines.append("")
 
+    # Design decision (internal-mcp-integration, Requirement 10.2):
+    # Builder MCP internal technical context (wiki, code search, prior art)
+    # flows through the existing technical_context_and_dependencies prose
+    # field. Agents thread Builder MCP content into this field at generation
+    # time. No new BRDOutput schema fields are introduced, so the renderer
+    # handles MCP-sourced content transparently via the same field below.
     lines += [
         "## 7. Technical Context and Dependencies",
         "",
@@ -268,6 +274,12 @@ def render_brd_to_markdown(output: BRDOutput, slug: str = "") -> str:
     lines += _table(["Metric", "Target", "Measurement", "Timeline"], sm_rows)
     lines.append("")
 
+    # Design decision (internal-mcp-integration, Requirement 10.3):
+    # Outlook MCP stakeholder availability data flows through the existing
+    # timeline_and_milestones prose field. Agents thread Outlook scheduling
+    # context into this field at generation time. No new BRDOutput schema
+    # fields are introduced, so the renderer handles MCP-sourced content
+    # transparently via the same field below.
     lines += ["## 11. Timeline and Milestones", ""]
     if output.timeline_and_milestones:
         lines.append(output.timeline_and_milestones)
