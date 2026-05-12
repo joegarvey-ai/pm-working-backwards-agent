@@ -12,10 +12,12 @@ LLM API call is timed, recorded as a
 from __future__ import annotations
 
 import functools
+import json
 import time
 from collections.abc import Callable
 from typing import Any
 
+from crewai.llms.base_llm import BaseLLM
 from pm_agent_system.pricing import estimate_cost
 
 from .exceptions import ReplayExhaustedError
@@ -50,6 +52,13 @@ class ToolInterceptor:
         self._trace_builder = trace_builder
         self._replay_calls = replay_calls
         self._replay_index = 0
+        self._per_tool_replay: dict[str, list[ToolCallRecord]] = {}
+        self._per_tool_index: dict[str, int] = {}
+        if replay_calls is not None:
+            for call in replay_calls:
+                key = call.tool_name
+                self._per_tool_replay.setdefault(key, []).append(call)
+                self._per_tool_index.setdefault(key, 0)
 
     # -- public API ---------------------------------------------------------
 
@@ -118,13 +127,27 @@ class ToolInterceptor:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> str:
-        """Return the next canned response from the replay sequence."""
-        assert self._replay_calls is not None
-        if self._replay_index >= len(self._replay_calls):
-            raise ReplayExhaustedError("tool", self._replay_index)
+        """Return the next canned response from the replay sequence.
 
-        record = self._replay_calls[self._replay_index]
-        self._replay_index += 1
+        Uses per-tool-name queues so that parallel async tasks pulling
+        from different tools do not interleave responses.
+        """
+        assert self._replay_calls is not None
+        tool_name = getattr(tool, "name", type(tool).__name__)
+
+        if tool_name in self._per_tool_replay:
+            idx = self._per_tool_index[tool_name]
+            calls = self._per_tool_replay[tool_name]
+            if idx >= len(calls):
+                raise ReplayExhaustedError("tool", idx)
+            record = calls[idx]
+            self._per_tool_index[tool_name] = idx + 1
+        else:
+            if self._replay_index >= len(self._replay_calls):
+                raise ReplayExhaustedError("tool", self._replay_index)
+            record = self._replay_calls[self._replay_index]
+            self._replay_index += 1
+
         return record.return_value
 
 
@@ -160,10 +183,17 @@ class LLMInterceptor:
         self._trace_builder = trace_builder
         self._replay_calls = replay_calls
         self._replay_index = 0
+        self._per_agent_replay: dict[str, list[LLMCallRecord]] = {}
+        self._per_agent_index: dict[str, int] = {}
+        if replay_calls is not None:
+            for call in replay_calls:
+                key = call.agent_name
+                self._per_agent_replay.setdefault(key, []).append(call)
+                self._per_agent_index.setdefault(key, 0)
 
     # -- public API ---------------------------------------------------------
 
-    def wrapped_llm(self, max_tokens: int = 8192) -> Any:
+    def wrapped_llm(self, max_tokens: int = 8192, agent_name: str = "") -> Any:
         """Return an LLM instance that records or replays calls.
 
         In **live mode** the returned LLM's ``call`` method is wrapped so
@@ -175,7 +205,7 @@ class LLMInterceptor:
         :class:`ReplayExhaustedError` when the sequence runs out.
         """
         if self._replay_calls is not None:
-            return self._build_replay_llm()
+            return self._build_replay_llm(agent_name)
 
         return self._build_live_llm(max_tokens)
 
@@ -238,8 +268,7 @@ class LLMInterceptor:
                 from_agent=from_agent,
                 **kwargs,
             )
-            # The call method may return a string or a Pydantic model.
-            output_text = str(result) if result is not None else ""
+            output_text = _serialize_llm_result(result)
 
             # Compute token delta from the LLM's internal tracker.
             usage_after = _snapshot_token_usage(llm)
@@ -279,9 +308,9 @@ class LLMInterceptor:
 
     # -- replay mode --------------------------------------------------------
 
-    def _build_replay_llm(self) -> "_ReplayLLM":
+    def _build_replay_llm(self, agent_name: str = "") -> "_ReplayLLM":
         """Return a lightweight stand-in that replays canned responses."""
-        return _ReplayLLM(self)
+        return _ReplayLLM(self, agent_name=agent_name)
 
 
 # ---------------------------------------------------------------------------
@@ -289,41 +318,70 @@ class LLMInterceptor:
 # ---------------------------------------------------------------------------
 
 
-class _ReplayLLM:
+class _ReplayLLM(BaseLLM):
     """Minimal LLM stand-in used during replay mode.
 
-    Exposes a ``call`` method that returns the next recorded response text.
-    Also exposes ``model`` and ``get_token_usage_summary`` so that
-    downstream code that inspects the LLM object does not break.
+    Extends BaseLLM so it passes CrewAI's isinstance check during
+    agent executor creation. Returns canned responses from a prior
+    recording instead of calling any API.
+
+    Each instance is bound to an agent_name so that parallel async tasks
+    pull from the correct replay queue rather than racing on a shared index.
     """
 
-    def __init__(self, interceptor: LLMInterceptor) -> None:
-        self._interceptor = interceptor
-        # Set a sensible default model; will be overridden per-call.
-        self.model = "replay"
+    llm_type: str = "replay"
+    _interceptor: Any = None
+    _agent_name: str = ""
+
+    def __init__(self, interceptor: LLMInterceptor, agent_name: str = "") -> None:
+        super().__init__(model="replay")
+        object.__setattr__(self, "_interceptor", interceptor)
+        object.__setattr__(self, "_agent_name", agent_name)
 
     def call(
         self,
         messages: Any = None,
         *args: Any,
         **kwargs: Any,
-    ) -> str:
+    ) -> Any:
         """Return the next canned LLM response."""
-        idx = self._interceptor._replay_index
-        replay_calls = self._interceptor._replay_calls
-        assert replay_calls is not None
+        agent_key = self._agent_name
+        per_agent = self._interceptor._per_agent_replay
+        per_idx = self._interceptor._per_agent_index
 
-        if idx >= len(replay_calls):
-            raise ReplayExhaustedError("LLM", idx)
+        if agent_key and agent_key in per_agent:
+            idx = per_idx[agent_key]
+            calls = per_agent[agent_key]
+            if idx >= len(calls):
+                raise ReplayExhaustedError("LLM", idx)
+            record = calls[idx]
+            per_idx[agent_key] = idx + 1
+        else:
+            idx = self._interceptor._replay_index
+            replay_calls = self._interceptor._replay_calls
+            assert replay_calls is not None
+            if idx >= len(replay_calls):
+                raise ReplayExhaustedError("LLM", idx)
+            record = replay_calls[idx]
+            self._interceptor._replay_index += 1
 
-        record = replay_calls[idx]
-        self._interceptor._replay_index += 1
         self.model = record.model_id
-        return record.output_text
+        return _deserialize_llm_result(record.output_text)
+
+    def supports_function_calling(self) -> bool:
+        """Signal that this LLM supports native tool calling.
+
+        This enables CrewAI's native tool loop so that replayed tool-use
+        responses are processed correctly (parsed as tool calls, executed
+        via the tool interceptor, then the loop continues).
+        """
+        return True
 
     def get_token_usage_summary(self) -> Any:
-        """Return a no-op usage summary for compatibility."""
-        return None
+        """Return a zero-valued usage summary for compatibility."""
+        from crewai.types.usage_metrics import UsageMetrics
+
+        return UsageMetrics()
 
 
 # ---------------------------------------------------------------------------
@@ -405,5 +463,64 @@ def _extract_name(obj: Any, fallback_prefix: str) -> str:
     for attr in ("name", "role", "description"):
         val = getattr(obj, attr, None)
         if val and isinstance(val, str):
-            return val
+            return val.strip()
     return f"unknown_{fallback_prefix}"
+
+
+_PYDANTIC_PREFIX = "__pydantic__:"
+
+
+def _serialize_llm_result(result: Any) -> str:
+    """Convert an LLM result to a string for storage.
+
+    Tool-use responses (list[dict]) get JSON-encoded so they can be
+    round-tripped during replay. Pydantic models use model_dump_json()
+    with a type prefix so the correct model can be reconstructed.
+    Plain strings are stored as-is.
+    """
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result
+    # Pydantic BaseModel: store as typed JSON for accurate reconstruction.
+    try:
+        from pydantic import BaseModel as _BM
+
+        if isinstance(result, _BM):
+            module = type(result).__module__
+            qualname = type(result).__qualname__
+            return f"{_PYDANTIC_PREFIX}{module}.{qualname}\n{result.model_dump_json()}"
+    except ImportError:
+        pass
+    try:
+        return json.dumps(result, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return str(result)
+
+
+def _deserialize_llm_result(output_text: str) -> Any:
+    """Recover the original LLM result type from stored output_text.
+
+    Recognizes three formats:
+    - Pydantic prefix: reconstruct the model from JSON
+    - JSON array/object: tool-use response (list of dicts)
+    - Plain text: return as string
+    """
+    if not output_text:
+        return ""
+    if output_text.startswith(_PYDANTIC_PREFIX):
+        header, json_body = output_text.split("\n", 1)
+        type_path = header[len(_PYDANTIC_PREFIX):]
+        module_path, class_name = type_path.rsplit(".", 1)
+        import importlib
+
+        mod = importlib.import_module(module_path)
+        model_class = getattr(mod, class_name)
+        return model_class.model_validate_json(json_body)
+    try:
+        parsed = json.loads(output_text)
+        if isinstance(parsed, (list, dict)):
+            return parsed
+        return output_text
+    except (json.JSONDecodeError, ValueError):
+        return output_text

@@ -179,7 +179,8 @@ def run_crew(
 
     # Replace the LLM on each agent with the intercepted version.
     for ag in getattr(crew, "agents", []):
-        ag.llm = llm_interceptor.wrapped_llm()
+        agent_name = (getattr(ag, "role", None) or getattr(ag, "name", None) or "").strip()
+        ag.llm = llm_interceptor.wrapped_llm(agent_name=agent_name)
 
     # 5. Execute the crew.
     try:
