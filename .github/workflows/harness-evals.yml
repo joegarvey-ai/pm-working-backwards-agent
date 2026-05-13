@@ -1,0 +1,115 @@
+name: Harness Evals
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deterministic-evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run property-based tests
+        run: uv run pytest tests/test_harness_properties.py -q
+
+      - name: Run harness API tests
+        run: uv run pytest tests/test_harness_api.py -q
+
+      - name: Run harness replay tests
+        run: uv run pytest tests/test_harness_replay.py -q
+
+  replay-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Replay research baseline
+        run: |
+          uv run python -c "
+          import yaml
+          from tests.harness import run_crew, load_record
+          from tests.harness.evals.quality import assert_no_banned_words
+          from tests.harness.evals.cost import check_cost_cap
+          from tests.harness.evals.latency import check_latency_budget
+          from pm_agent_system.crew import PmAgentSystem
+
+          with open('examples/input.yaml') as f:
+              inputs = yaml.safe_load(f)
+
+          crew = PmAgentSystem().research_crew(skip_validation=True)
+          for t in crew.tasks:
+              t.human_input = False
+
+          record = run_crew(crew, inputs, replay_path='tests/recordings/research_baseline.json')
+
+          assert len(record.agent_outputs) >= 3, f'Expected 3 agent outputs, got {len(record.agent_outputs)}'
+          print(f'Replay OK: {len(record.agent_outputs)} outputs')
+          "
+
+      - name: Replay PRFAQ baseline
+        run: |
+          uv run python -c "
+          import yaml
+          from tests.harness import run_crew
+          from pm_agent_system.crew import PmAgentSystem
+
+          with open('examples/input.yaml') as f:
+              inputs = yaml.safe_load(f)
+
+          crew = PmAgentSystem().research_and_generate_crew(skip_validation=True)
+          for t in crew.tasks:
+              t.human_input = False
+
+          record = run_crew(crew, inputs, replay_path='tests/recordings/prfaq_baseline.json')
+
+          assert len(record.agent_outputs) >= 4, f'Expected 4 agent outputs, got {len(record.agent_outputs)}'
+          print(f'Replay OK: {len(record.agent_outputs)} outputs')
+          "
+
+      - name: Eval research baseline (cost cap, banned words)
+        run: |
+          uv run python -c "
+          from tests.harness import load_record
+          from tests.harness.evals.quality import assert_no_banned_words
+          from tests.harness.evals.cost import check_cost_cap
+
+          record = load_record('tests/recordings/research_baseline.json')
+          check_cost_cap(record, max_cost_usd=2.00)
+          assert_no_banned_words(record)
+          print('Evals passed: cost cap \$2.00, no banned words')
+          "
+
+      - name: Eval PRFAQ baseline (cost cap, banned words)
+        run: |
+          uv run python -c "
+          from tests.harness import load_record
+          from tests.harness.evals.quality import assert_no_banned_words
+          from tests.harness.evals.cost import check_cost_cap
+
+          record = load_record('tests/recordings/prfaq_baseline.json')
+          check_cost_cap(record, max_cost_usd=2.00)
+          assert_no_banned_words(record)
+          print('Evals passed: cost cap \$2.00, no banned words')
+          "
+
