@@ -22,7 +22,7 @@ from .exceptions import HarnessConfigError, ManifestDriftError
 from .interceptors import LLMInterceptor, ToolInterceptor
 from .logging import emit_event
 from .meters import CostMeter, LatencyMeter
-from .models import RunManifest, RunRecord, SpanType
+from .models import PromptSnapshot, RunManifest, RunRecord, SpanType
 from .trace import TraceBuilder
 
 
@@ -88,6 +88,43 @@ def _capture_manifest(
         env_flags=env_flags,
         input_brief_hash=input_brief_hash,
     )
+
+
+def _capture_prompt_snapshots(crew: Any) -> list[PromptSnapshot]:
+    """Capture interpolated prompt text from all agents and tasks.
+
+    After kickoff, each task and agent has its interpolated role, goal,
+    backstory, description, and expected_output set. We pair them by
+    the agent assigned to each task.
+    """
+    snapshots: list[PromptSnapshot] = []
+    for idx, task_obj in enumerate(getattr(crew, "tasks", [])):
+        agent_obj = getattr(task_obj, "agent", None)
+        if agent_obj is None:
+            continue
+
+        agent_role = (getattr(agent_obj, "role", None) or "").strip()
+        agent_goal = (getattr(agent_obj, "goal", None) or "").strip()
+        agent_backstory = (getattr(agent_obj, "backstory", None) or "").strip()
+        agent_name = agent_role or (getattr(agent_obj, "name", None) or "unknown").strip()
+
+        task_description = (getattr(task_obj, "description", None) or "").strip()
+        task_expected_output = (getattr(task_obj, "expected_output", None) or "").strip()
+        task_name = (getattr(task_obj, "name", None) or "unknown_task").strip()
+
+        snapshots.append(
+            PromptSnapshot(
+                agent_role=agent_role,
+                agent_goal=agent_goal,
+                agent_backstory=agent_backstory,
+                task_description=task_description,
+                task_expected_output=task_expected_output,
+                agent_name=agent_name,
+                task_name=task_name,
+                sequence_index=idx,
+            )
+        )
+    return snapshots
 
 
 # ---------------------------------------------------------------------------
@@ -203,11 +240,14 @@ def run_crew(
             task_name = getattr(task_obj, "name", None) or "unknown_task"
             agent_outputs[task_name] = str(output)
 
+    # 8b. Capture prompt snapshots (interpolated agent/task text).
+    prompt_snapshots = _capture_prompt_snapshots(crew)
+
     # 9. Assemble the RunRecord.
     record = RunRecord(
         run_id=run_id,
         manifest=manifest,
-        prompt_snapshots=[],
+        prompt_snapshots=prompt_snapshots,
         tool_calls=tool_interceptor.records,
         llm_calls=llm_interceptor.records,
         trace=trace,
