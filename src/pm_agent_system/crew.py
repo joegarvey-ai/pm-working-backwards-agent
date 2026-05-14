@@ -71,12 +71,21 @@ _DEFAULT_MAX_TOKENS = 8192
 _LARGE_MAX_TOKENS = 32768
 
 
-def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS):
+def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS, agent_key: str = ""):
     """Return an LLM instance based on the configured provider.
+
+    When MODEL_ROUTING_ENABLED=true and agent_key is provided, routes
+    to the appropriate model tier (opus/sonnet/haiku) via the
+    orchestration module. Otherwise returns the default Sonnet model.
 
     Bedrock uses the AWS_BEARER_TOKEN_BEDROCK env var picked up by boto3's
     standard credential chain. Anthropic uses ANTHROPIC_API_KEY.
     """
+    from pm_agent_system.orchestration import is_routing_enabled, routed_llm
+
+    if agent_key and is_routing_enabled():
+        return routed_llm(agent_key, max_tokens=max_tokens)
+
     if _LLM_PROVIDER == "bedrock":
         from crewai.llms.providers.bedrock.completion import BedrockCompletion
         return BedrockCompletion(
@@ -162,7 +171,7 @@ class PmAgentSystem:
         return Agent(
             config=self.agents_config["research_agent"],  # type: ignore[index]
             tools=[],
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="research_agent"),
             verbose=True,
         )
 
@@ -186,7 +195,7 @@ class PmAgentSystem:
         return Agent(
             config=self.agents_config["external_research_agent"],  # type: ignore[index]
             tools=tools,
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="external_research_agent"),
             verbose=True,
         )
 
@@ -202,7 +211,7 @@ class PmAgentSystem:
             tools=[
                 DovetailSearchTool(),
             ],
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="customer_evidence_agent"),
             verbose=True,
         )
 
@@ -219,7 +228,7 @@ class PmAgentSystem:
         return Agent(
             config=self.agents_config["prfaq_agent"],  # type: ignore[index]
             tools=tools,
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="prfaq_agent"),
             verbose=True,
         )
 
@@ -232,7 +241,7 @@ class PmAgentSystem:
                 ObsidianSearchTool(),
                 ObsidianReadTool(),
             ],
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="design_brief_agent"),
             verbose=True,
         )
 
@@ -256,7 +265,7 @@ class PmAgentSystem:
         return Agent(
             config=self.agents_config["brd_agent"],  # type: ignore[index]
             tools=tools,
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="brd_agent"),
             verbose=True,
         )
 
@@ -282,7 +291,7 @@ class PmAgentSystem:
                 AWSDocsReadTool(),
                 FileReaderTool(),
             ],
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="brd_cost_risk_agent"),
             verbose=True,
         )
 
@@ -309,7 +318,7 @@ class PmAgentSystem:
         return Agent(
             config=self.agents_config["brd_compliance_agent"],  # type: ignore[index]
             tools=tools,
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="brd_compliance_agent"),
             verbose=True,
         )
 
@@ -329,7 +338,7 @@ class PmAgentSystem:
         return Agent(
             config=self.agents_config["brd_assembly_agent"],  # type: ignore[index]
             tools=[],
-            llm=_llm(_LARGE_MAX_TOKENS),
+            llm=_llm(_LARGE_MAX_TOKENS, agent_key="brd_assembly_agent"),
             verbose=True,
         )
 
@@ -354,7 +363,7 @@ class PmAgentSystem:
             tools=[
                 FileReaderTool(),
             ],
-            llm=_llm(_DEFAULT_MAX_TOKENS),
+            llm=_llm(_DEFAULT_MAX_TOKENS, agent_key="feedback_classifier_agent"),
             verbose=True,
         )
 
