@@ -209,11 +209,28 @@ class LLMInterceptor:
 
         return self._build_live_llm(max_tokens)
 
+    def wrap_existing_llm(self, llm: Any, agent_name: str = "") -> Any:
+        """Wrap an existing LLM instance with interception (preserving routing).
+
+        Use this instead of wrapped_llm() when the agent already has a
+        routed LLM instance that should be preserved.
+
+        In replay mode, returns a replay LLM (ignoring the existing instance).
+        In live mode, wraps the existing instance's call method in-place.
+        """
+        if self._replay_calls is not None:
+            return self._build_replay_llm(agent_name)
+        return self._wrap_existing_llm(llm)
+
     # -- live mode ----------------------------------------------------------
 
     def _build_live_llm(self, max_tokens: int) -> Any:
         """Create a real LLM and wrap its ``call`` method."""
         llm = self._original_llm_factory(max_tokens=max_tokens)
+        return self._wrap_existing_llm(llm)
+
+    def _wrap_existing_llm(self, llm: Any) -> Any:
+        """Wrap an existing LLM instance's call method with interception."""
         original_call = llm.call
 
         @functools.wraps(original_call)

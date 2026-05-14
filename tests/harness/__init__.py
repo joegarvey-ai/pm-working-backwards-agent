@@ -214,10 +214,10 @@ def run_crew(
         for tool in getattr(ag, "tools", []) or []:
             tool_interceptor.wrap_tool(tool)
 
-    # Replace the LLM on each agent with the intercepted version.
+    # Wrap the LLM on each agent with interception (preserving any routing).
     for ag in getattr(crew, "agents", []):
         agent_name = (getattr(ag, "role", None) or getattr(ag, "name", None) or "").strip()
-        ag.llm = llm_interceptor.wrapped_llm(agent_name=agent_name)
+        ag.llm = llm_interceptor.wrap_existing_llm(ag.llm, agent_name=agent_name)
 
     # 5. Execute the crew.
     try:
