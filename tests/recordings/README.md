@@ -7,9 +7,9 @@ Baseline recordings for replay-based regression testing. Each file is a
 
 | File | Crew | LLM calls | Tool calls | Cost | Status |
 |------|------|-----------|------------|------|--------|
-| `research_baseline.json` | `research_crew` | 8 | 17 | $0.51 | Stable |
-| `prfaq_baseline.json` | `research_and_generate_crew` | 9 | 17 | $0.71 | Stable |
-| `full_pipeline_baseline.json` | `full_pipeline_crew` | — | — | ~$1.50 | Blocked (see below) |
+| `research_baseline.json` | `research_crew` | 7 | 14 | $0.45 | Stable (replay OK) |
+| `prfaq_baseline.json` | `research_and_generate_crew` | 10 | 17 | $0.76 | Stable (replay OK) |
+| `full_pipeline_baseline.json` | `full_pipeline_crew` | 23 | 38 | $2.35 | Eval-only (replay limited) |
 
 ## How to regenerate
 
@@ -55,22 +55,31 @@ record = run_crew(crew, inputs, replay_path="tests/recordings/research_baseline.
 
 Replay serves canned LLM and tool responses. No API calls are made. Completes in seconds.
 
-## Full pipeline recording: blocked
+## Full pipeline recording: eval-only
 
-The full pipeline recording fails intermittently due to two pre-existing issues
-unrelated to the harness:
+The full pipeline recording was produced with `sequential_brd=True` which
+eliminates the Bedrock toolResult interleaving race condition. It captures
+all 9 task outputs and is usable for eval assertions:
 
-1. **Bedrock toolResult interleaving.** CrewAI's agent executor has a race
-   condition where parallel async tasks (brd_structure, brd_cost_risk,
-   brd_compliance) occasionally interleave tool-use/tool-result messages in
-   the conversation history. Bedrock's Converse API requires strict pairing
-   and rejects the request. Documented in `docs/recaps/2026-04-24_phase4a_research_parallelization.md`.
+```python
+from tests.harness import load_record
+from tests.harness.evals.quality import assert_no_banned_words
+from tests.harness.evals.cost import check_cost_cap
 
-2. **BRDComplianceOutput validator contradiction.** The LLM sometimes sets
-   `data_handling_gap_flag=True` while also populating `data_elements`,
-   violating the mutual exclusivity constraint in the Pydantic model validator
-   at `src/pm_agent_system/models/brd_intermediate.py:92-107`.
+record = load_record("tests/recordings/full_pipeline_baseline.json")
+check_cost_cap(record, max_cost_usd=3.00)
+assert_no_banned_words(record)
+```
 
-Both issues are non-deterministic (succeed ~50-70% of the time). The fix
-belongs in the production code, not the harness. Tracked in the roadmap for
-resolution after harness hardening is complete.
+Full replay is not yet supported because CrewAI's structured output
+converter makes additional LLM calls during validation retries that
+the replay queue cannot predict. This is a known limitation tracked
+for future work.
+
+## Resolved production issues
+
+1. **Bedrock toolResult interleaving** (resolved): Use `sequential_brd=True`
+   to run BRD tasks sequentially instead of in parallel.
+
+2. **BRDComplianceOutput validator** (resolved): The validator now
+   auto-corrects contradictory LLM output instead of crashing.
