@@ -9,20 +9,20 @@ Each verification checks:
 3. Source attribution preservation
 4. Customer problem grounding (original problem statement referenced)
 
-Usage:
+Usage (standalone):
     from pm_agent_system.verification import verify_stage
 
     result = verify_stage(
         stage_output="<the output text from the just-completed stage>",
         input_brief="<original input brief>",
-        prior_outputs={"research": "<research output>"},  # outputs from earlier stages
+        prior_outputs={"research": "<research output>"},
         stage_name="prfaq",
     )
 
-    if not result.passed:
-        print(result.summary)
-        for issue in result.issues:
-            print(f"  [{issue.category}] {issue.description}")
+Usage (integrated pipeline):
+    from pm_agent_system.verification import run_verified_pipeline
+
+    results = run_verified_pipeline(inputs, stages=["research", "prfaq"])
 """
 
 from __future__ import annotations
@@ -207,3 +207,106 @@ def verify_stage(
         summary=summary,
         raw_response=raw,
     )
+
+
+# ---------------------------------------------------------------------------
+# Integrated pipeline with verification gates
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PipelineResult:
+    """Result of a verified pipeline run."""
+
+    stage_outputs: dict[str, str] = field(default_factory=dict)
+    verifications: list[VerificationResult] = field(default_factory=list)
+    failed_at: str | None = None
+    all_passed: bool = True
+
+
+_STAGE_TO_CREW = {
+    "research": "research_crew",
+    "prfaq": "research_and_generate_crew",
+}
+
+_STAGE_OUTPUT_KEYS = {
+    "research": "research_synthesis_task",
+    "prfaq": "generate_prfaq",
+    "brd": "brd_assembly_task",
+    "build_spec": "generate_build_spec_chained",
+}
+
+
+def run_verified_pipeline(
+    inputs: dict[str, Any],
+    stages: list[str] | None = None,
+    halt_on_fail: bool = False,
+    skip_validation: bool = True,
+) -> PipelineResult:
+    """Run pipeline stages with verification gates between each.
+
+    Each stage runs its crew, then the verification gate checks the
+    output before the next stage begins. If a gate fails and
+    halt_on_fail=True, the pipeline stops.
+
+    Args:
+        inputs: The input brief dict (from examples/input.yaml).
+        stages: Which stages to run, in order. Default: ["research", "prfaq"].
+            Supported: "research", "prfaq" (more coming with full pipeline support).
+        halt_on_fail: If True, stop the pipeline when a verification gate
+            returns errors (not just warnings). Default: False (continue).
+        skip_validation: Skip the input validation task. Default: True.
+
+    Returns:
+        PipelineResult with outputs, verification results, and pass/fail.
+    """
+    import yaml
+    from pm_agent_system.crew import PmAgentSystem
+
+    if stages is None:
+        stages = ["research", "prfaq"]
+
+    input_brief = yaml.dump(inputs, default_flow_style=False)
+    result = PipelineResult()
+    system = PmAgentSystem()
+
+    for stage in stages:
+        if stage == "research":
+            crew = system.research_crew(skip_validation=skip_validation)
+        elif stage == "prfaq":
+            crew = system.research_and_generate_crew(skip_validation=skip_validation)
+        else:
+            continue
+
+        for t in getattr(crew, "tasks", []):
+            t.human_input = False
+
+        crew_result = crew.kickoff(inputs=inputs)
+
+        for task_output in crew_result.tasks_output:
+            task_name = getattr(task_output, "name", None) or ""
+            if task_name:
+                result.stage_outputs[task_name] = str(task_output)
+
+        output_key = _STAGE_OUTPUT_KEYS.get(stage, "")
+        stage_output = result.stage_outputs.get(output_key, "")
+
+        if not stage_output:
+            continue
+
+        prior = {k: v for k, v in result.stage_outputs.items() if k != output_key}
+
+        verification = verify_stage(
+            stage_output=stage_output,
+            input_brief=input_brief,
+            prior_outputs=prior if prior else None,
+            stage_name=stage,
+        )
+        result.verifications.append(verification)
+
+        if not verification.passed:
+            result.all_passed = False
+            if halt_on_fail:
+                result.failed_at = stage
+                break
+
+    return result
