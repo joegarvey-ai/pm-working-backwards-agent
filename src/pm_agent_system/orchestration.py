@@ -142,9 +142,11 @@ _RETRYABLE_ERRORS = (
     "Expected toolResult blocks",
     "toolResult",
     "Request validation failed",
+    "Failed to validate structured_output tool response",
+    "validation error for",
 )
 
-_MAX_RETRIES = int(os.getenv("CREW_MAX_RETRIES", "3"))
+_MAX_RETRIES = int(os.getenv("CREW_MAX_RETRIES", "5"))
 
 
 def run_crew_with_retry(
@@ -181,7 +183,7 @@ def run_crew_with_retry(
             for t in getattr(crew, "tasks", []):
                 t.human_input = False
             return crew.kickoff(inputs=inputs)
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, Exception) as exc:
             error_str = str(exc)
             if not any(pattern in error_str for pattern in _RETRYABLE_ERRORS):
                 raise
