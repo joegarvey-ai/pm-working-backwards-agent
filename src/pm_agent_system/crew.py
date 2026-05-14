@@ -586,12 +586,19 @@ class PmAgentSystem:
         )
 
     def full_pipeline_crew(
-        self, skip_validation: bool = False, skip_design: bool = False
+        self,
+        skip_validation: bool = False,
+        skip_design: bool = False,
+        sequential_brd: bool = False,
     ) -> Crew:
         """Agent 1 → Agent 2 → Agent 3 (optional) → Agent 4 split.
 
         When ``skip_design`` is True, Agent 3 is omitted and the pipeline
         matches the original three-agent behavior exactly.
+
+        When ``sequential_brd`` is True, BRD structure/cost_risk/compliance
+        run sequentially instead of in parallel. Slower (~2min extra) but
+        eliminates the Bedrock toolResult interleaving race condition.
 
         BRD uses the split topology (structure + cost_risk in parallel,
         then assembly) to shave wall-clock time off the biggest stage.
@@ -622,13 +629,14 @@ class PmAgentSystem:
         brd_structure_context = [research, prfaq_task]
         if design_task is not None:
             brd_structure_context.append(design_task)
+        brd_async = not sequential_brd
         brd_structure_task = Task(
             config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
             output_pydantic=BRDStructureOutput,
             context=brd_structure_context,
             name="brd_structure_task",
             agent=self.brd_agent(),
-            async_execution=True,
+            async_execution=brd_async,
         )
         brd_cost_risk_task = Task(
             config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
@@ -636,7 +644,7 @@ class PmAgentSystem:
             context=[research, prfaq_task],
             name="brd_cost_risk_task",
             agent=self.brd_cost_risk_agent(),
-            async_execution=True,
+            async_execution=brd_async,
         )
         brd_compliance_task = Task(
             config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
@@ -644,7 +652,7 @@ class PmAgentSystem:
             context=[research, prfaq_task],
             name="brd_compliance_task",
             agent=self.brd_compliance_agent(),
-            async_execution=True,
+            async_execution=brd_async,
         )
         brd_assembly_task = Task(
             config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
