@@ -206,6 +206,10 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 | `DEFAULT_TARGET_TOOL` | no | Which coding tool the build spec is formatted for. One of `kiro`, `claude_code`, `cursor`, `lovable`. Defaults to `kiro`. |
 | `AWS_PRICING_REGION` | no | AWS region for pricing lookups. Defaults to `us-east-1`. The AWS Pricing API is public but boto3 may need credentials — see `.env.example`. |
 | `OUTPUT_RETENTION_DAYS` | no | How many days output files live before being archived. Defaults to 30. |
+| `MODEL_ROUTING_ENABLED` | no | Set to `true` to enable tiered model routing (Opus for research/PRFAQ, Haiku for classification). Default: off (all Sonnet). |
+| `LLM_PROVIDER` | no | `bedrock` or `anthropic`. Defaults to `anthropic`. Bedrock uses `AWS_BEARER_TOKEN_BEDROCK`. |
+| `AWS_BEARER_TOKEN_BEDROCK` | no | Bedrock API key (bearer token). Required when `LLM_PROVIDER=bedrock`. |
+| `CREW_MAX_RETRIES` | no | Max retries on transient Bedrock errors. Defaults to 5. |
 
 ## Architecture
 
@@ -221,6 +225,65 @@ Four agents, each with a single job, chained by a CrewAI orchestrator. Agent 4 p
 The orchestrator lives in `src/pm_agent_system/crew.py`. Agent and task definitions are in `src/pm_agent_system/config/agents.yaml` and `tasks.yaml`. Each agent's outputs are validated against a Pydantic model in `src/pm_agent_system/models/`.
 
 A human-in-the-loop checkpoint sits between every stage. The agents do not auto-advance from research to PRFAQ or PRFAQ to BRD. You read the output, decide if it is good, and either approve it or run the `revise` command.
+
+## Observability and Quality
+
+The system includes a harness, evaluation framework, and model routing layer for measuring, replaying, and improving output quality.
+
+### Model Routing
+
+Set `MODEL_ROUTING_ENABLED=true` in `.env` to automatically route LLM calls to the best model for each task:
+
+| Task type | Model | Why |
+|---|---|---|
+| Research synthesis, PRFAQ writing | Opus | High-stakes creative work, stakeholder-facing |
+| External research, BRD, build spec | Sonnet | Structural tasks with explicit schemas |
+| Feedback classification | Haiku | Mechanical routing, no creativity needed |
+
+Routing produced +0.8 improvement on PRFAQ fidelity scores (3.2 to 4.0/5) while reducing cost by 60%.
+
+### Harness and Replay
+
+Every pipeline run can be recorded and replayed without API calls:
+
+```bash
+# Record a run
+uv run python -c "from tests.harness import run_crew; ..."
+
+# Replay (instant, no API cost)
+uv run python -c "from tests.harness import run_crew; run_crew(crew, inputs, replay_path='tests/recordings/research_baseline.json')"
+```
+
+Golden recordings in `tests/recordings/` serve as regression baselines. CI replays them on every push.
+
+### Quality Evals
+
+Three LLM-as-judge evaluators score outputs on a 1-5 rubric:
+
+- **PRFAQ fidelity**: em dashes, contrast hooks, inverted pyramid, paragraph discipline, inline citations
+- **Citation accuracy**: sourced claims ratio, citation validity, claim-support strength
+- **AWS alignment**: service defaults, unauthorized vendors, specificity
+
+### Verification Gate
+
+An inter-stage quality gate checks each output before the next stage consumes it:
+
+```python
+from pm_agent_system.verification import run_verified_pipeline
+result = run_verified_pipeline(inputs, stages=["research", "prfaq"])
+```
+
+Catches: style drift, factual inconsistencies between stages, citation loss, and customer-problem grounding failures.
+
+### Trend Reporting and Trace Export
+
+```bash
+# Cost/latency/quality trends across recordings
+uv run python -m pm_agent_system.harness_trends --since 7d
+
+# Visual flamegraph timeline (self-contained HTML)
+uv run python -m pm_agent_system.trace_export tests/recordings/prfaq_baseline.json
+```
 
 ## Known limitations
 
