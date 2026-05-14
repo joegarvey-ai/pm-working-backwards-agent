@@ -103,29 +103,33 @@ def test_invalid_gate_owner_rejected_on_compliance_gate():
         ComplianceGate(name="security review", owner="Intern")
 
 
-def test_gap_flag_true_with_empty_gaps_rejected():
-    with pytest.raises(ValidationError):
-        BRDComplianceOutput(data_handling_gap_flag=True)
+def test_gap_flag_true_with_empty_gaps_auto_corrected():
+    output = BRDComplianceOutput(data_handling_gap_flag=True)
+    assert output.data_handling_gaps == [
+        "Data handling analysis incomplete (gap flag set with no details)"
+    ]
 
 
-def test_gap_flag_true_with_non_empty_elements_rejected():
-    with pytest.raises(ValidationError):
-        BRDComplianceOutput(
-            data_handling_gap_flag=True,
-            data_handling_gaps=["upstream PRFAQ did not list data elements"],
-            data_elements=[
-                DataElement(name="x", classification=DataClassification.PUBLIC)
-            ],
-        )
+def test_gap_flag_true_with_non_empty_elements_auto_corrected():
+    output = BRDComplianceOutput(
+        data_handling_gap_flag=True,
+        data_handling_gaps=["upstream PRFAQ did not list data elements"],
+        data_elements=[
+            DataElement(name="x", classification=DataClassification.PUBLIC)
+        ],
+    )
+    assert output.data_elements == []
+    assert output.data_handling_gaps == ["upstream PRFAQ did not list data elements"]
 
 
-def test_gap_flag_true_with_dataset_classification_rejected():
-    with pytest.raises(ValidationError):
-        BRDComplianceOutput(
-            data_handling_gap_flag=True,
-            data_handling_gaps=["upstream PRFAQ did not list data elements"],
-            dataset_classification=DataClassification.PUBLIC,
-        )
+def test_gap_flag_true_with_dataset_classification_auto_corrected():
+    output = BRDComplianceOutput(
+        data_handling_gap_flag=True,
+        data_handling_gaps=["upstream PRFAQ did not list data elements"],
+        dataset_classification=DataClassification.PUBLIC,
+    )
+    assert output.dataset_classification is None
+    assert output.data_handling_gaps == ["upstream PRFAQ did not list data elements"]
 
 
 def test_gap_flag_true_with_valid_pairing_accepted():

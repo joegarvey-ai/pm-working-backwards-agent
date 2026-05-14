@@ -92,16 +92,15 @@ class BRDComplianceOutput(BaseModel):
     @model_validator(mode="after")
     def _validate_gap_pairing(self):
         if self.data_handling_gap_flag:
+            # When the LLM flags a data-handling gap, it may still produce
+            # partial data_elements. Auto-correct: clear the partial data
+            # since the flag indicates low confidence.
             if self.data_elements:
-                raise ValueError(
-                    "data_handling_gap_flag is True but data_elements is non-empty"
-                )
+                self.data_elements = []
             if self.dataset_classification is not None:
-                raise ValueError(
-                    "data_handling_gap_flag is True but dataset_classification is set"
-                )
+                self.dataset_classification = None
             if not self.data_handling_gaps:
-                raise ValueError(
-                    "data_handling_gap_flag is True but data_handling_gaps is empty"
-                )
+                self.data_handling_gaps = [
+                    "Data handling analysis incomplete (gap flag set with no details)"
+                ]
         return self

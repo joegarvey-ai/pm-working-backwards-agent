@@ -149,40 +149,44 @@ def test_property_3_valid_gap_pairing_accepted(gaps):
     assert output.data_handling_gaps == gaps
 
 
-def test_property_3_gap_flag_true_empty_gaps_rejected():
-    with pytest.raises(ValidationError):
-        BRDComplianceOutput(
-            data_handling_gap_flag=True,
-            data_handling_gaps=[],
-        )
+def test_property_3_gap_flag_true_empty_gaps_auto_corrected():
+    output = BRDComplianceOutput(
+        data_handling_gap_flag=True,
+        data_handling_gaps=[],
+    )
+    assert output.data_handling_gaps == [
+        "Data handling analysis incomplete (gap flag set with no details)"
+    ]
 
 
 @given(
     gaps=st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=5),
     elements=st.lists(data_element_strategy(), min_size=1, max_size=5),
 )
-def test_property_3_gap_flag_true_with_elements_rejected(gaps, elements):
-    with pytest.raises(ValidationError):
-        BRDComplianceOutput(
-            data_handling_gap_flag=True,
-            data_handling_gaps=gaps,
-            data_elements=elements,
-        )
+def test_property_3_gap_flag_true_with_elements_auto_corrected(gaps, elements):
+    output = BRDComplianceOutput(
+        data_handling_gap_flag=True,
+        data_handling_gaps=gaps,
+        data_elements=elements,
+    )
+    assert output.data_elements == []
+    assert output.data_handling_gaps == gaps
 
 
 @given(
     gaps=st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=5),
     classification=st.sampled_from(list(DataClassification)),
 )
-def test_property_3_gap_flag_true_with_dataset_classification_rejected(
+def test_property_3_gap_flag_true_with_dataset_classification_auto_corrected(
     gaps, classification
 ):
-    with pytest.raises(ValidationError):
-        BRDComplianceOutput(
-            data_handling_gap_flag=True,
-            data_handling_gaps=gaps,
-            dataset_classification=classification,
-        )
+    output = BRDComplianceOutput(
+        data_handling_gap_flag=True,
+        data_handling_gaps=gaps,
+        dataset_classification=classification,
+    )
+    assert output.dataset_classification is None
+    assert output.data_handling_gaps == gaps
 
 
 @given(

@@ -5,6 +5,9 @@ Provides tiered LLM selection so that high-stakes creative tasks
 (BRD, build spec) use Sonnet, and mechanical tasks (validation,
 verification) use Haiku.
 
+Also provides retry logic for transient Bedrock errors (toolResult
+interleaving race condition in parallel async tasks).
+
 This module is additive: existing code paths work unchanged when
 MODEL_ROUTING_ENABLED is unset or false. Enable routing by setting
 MODEL_ROUTING_ENABLED=true in .env.
@@ -129,3 +132,70 @@ def routed_llm(agent_key: str, max_tokens: int = 8192) -> Any:
     from crewai.llms.providers.anthropic.completion import AnthropicCompletion
 
     return AnthropicCompletion(model=model_id, max_tokens=max_tokens)
+
+
+# ---------------------------------------------------------------------------
+# Retry logic for transient Bedrock errors
+# ---------------------------------------------------------------------------
+
+_RETRYABLE_ERRORS = (
+    "Expected toolResult blocks",
+    "toolResult",
+    "Request validation failed",
+)
+
+_MAX_RETRIES = int(os.getenv("CREW_MAX_RETRIES", "3"))
+
+
+def run_crew_with_retry(
+    crew_factory: Any,
+    inputs: dict[str, Any],
+    max_retries: int = _MAX_RETRIES,
+    on_retry: Any | None = None,
+) -> Any:
+    """Execute a crew with retry on known transient Bedrock errors.
+
+    Args:
+        crew_factory: A callable that returns a fresh Crew instance.
+            Must be a factory (not a pre-built crew) because CrewAI
+            mutates agent/task state during execution.
+        inputs: The inputs dict passed to crew.kickoff().
+        max_retries: Maximum number of retry attempts.
+        on_retry: Optional callback(attempt, error) called before each retry.
+
+    Returns:
+        The CrewOutput from a successful run.
+
+    Raises:
+        The last exception if all retries are exhausted.
+    """
+    import logging
+    import time
+
+    logger = logging.getLogger(__name__)
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            crew = crew_factory()
+            for t in getattr(crew, "tasks", []):
+                t.human_input = False
+            return crew.kickoff(inputs=inputs)
+        except (ValueError, RuntimeError) as exc:
+            error_str = str(exc)
+            if not any(pattern in error_str for pattern in _RETRYABLE_ERRORS):
+                raise
+            last_error = exc
+            if on_retry:
+                on_retry(attempt, exc)
+            logger.warning(
+                "Transient Bedrock error on attempt %d/%d: %s",
+                attempt,
+                max_retries,
+                error_str[:150],
+            )
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+
+    assert last_error is not None
+    raise last_error
