@@ -48,6 +48,18 @@ The BRD stage runs three async siblings in parallel (`brd_structure_task`, `brd_
 - Harness code lives in `tests/harness/` only. Never imported by production code.
 - Never call real LLMs in unit tests. Use replay mode or mocks.
 
+## Conversational pipeline workflow
+
+When a user describes a product idea (even informally), follow this process:
+
+1. **Ask clarifying questions** before structuring anything. You need: feature summary, target user, goals, success metrics, known constraints, and business context. Ask 3-5 focused questions to fill gaps. Do NOT invent details.
+2. **Write a structured input brief** and present it for approval. Do not run the pipeline until the user says yes.
+3. **Run stages individually** (`research`, then `generate`, then `brd`, then `build-spec`). Do not use `full-pipeline`. Add `--skip-validation` to each.
+4. **Summarize each output** in 3-5 sentences. Wait for the user to say "proceed" or give feedback before running the next stage.
+5. **Run the verification gate** between PRFAQ and BRD (or when the user asks "is this ready?"). Report issues conversationally.
+
+See `docs/using-with-claude-code.md` for the full workflow reference.
+
 ## What not to do
 
 - Do not add new top-level dependencies without updating `pyproject.toml`.
@@ -55,3 +67,5 @@ The BRD stage runs three async siblings in parallel (`brd_structure_task`, `brd_
 - Do not hardcode any user-specific paths. Use env vars with sensible defaults.
 - Do not modify `tests/recordings/*.json` by hand. Re-record via `run_crew()`.
 - Do not enable `MODEL_ROUTING_ENABLED` in CI. CI uses replay mode only.
+- Do not auto-fill gaps in the input brief. Ask the user, do not guess.
+- Do not run the pipeline without explicit user approval of the input brief.
