@@ -1,43 +1,93 @@
 """Builder MCP tool for internal Amazon systems.
 
-Wraps builder-mcp's JSON-RPC endpoint and exposes five actions:
+Wraps the canonical Amazon ``builder-mcp`` server (a stdio MCP binary
+distributed by ASBX) and exposes five actions to CrewAI agents:
+
   wiki_search       Search internal wikis.
   code_search       Search internal code repositories.
   taskei_search     Search Taskei task tracking (optional project_id).
   quip_search       Search Quip documents (optional document_id).
-  pipeline_search   Search pipelines (optional project_id).
+  pipeline_search   Get pipeline details by name.
 
-Authentication resolves via the shared ``_mcp_jsonrpc`` helper: midway
-cookie first, ``BUILDER_MCP_TOKEN`` fallback. When neither is available,
-``_run`` returns a descriptive error string and never raises.
+The action names are stable; tasks.yaml prompts continue to reference
+them. Internally each action routes to a canonical builder-mcp tool
+(e.g. ``InternalSearch`` with ``domain=WIKI``, ``InternalCodeSearch``,
+``TaskeiListTasks``, ``ReadInternalWebsites``, ``GetPipelineDetails``).
+
+Auth is handled by the ``builder-mcp`` binary itself via the user's
+Midway cookie (``mwinit -f``). This module does not handle tokens or
+endpoint URLs. When the binary is not on PATH, ``_run`` returns a
+descriptive error string and never raises, so the OSS variant of the
+pipeline runs unchanged for users outside Amazon.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
 from typing import Type
 
-import httpx
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from pm_agent_system.tools import _mcp_jsonrpc
+from pm_agent_system.tools import _mcp_stdio
 
 logger = logging.getLogger(__name__)
 
 _CALL_LOG_PATH = Path(os.getenv("OUTPUT_DIR", "./output")) / "builder_mcp_calls.log"
 
+_BINARY_NAME = "builder-mcp"
+
 # ---------------------------------------------------------------------------
-# Action to remote MCP tool name mapping
+# Action -> (canonical tool name, argument-builder) mapping
 # ---------------------------------------------------------------------------
-_ACTION_MAP: dict[str, str] = {
-    "wiki_search": "search_wiki",
-    "code_search": "search_code",
-    "taskei_search": "search_taskei",
-    "quip_search": "search_quip",
-    "pipeline_search": "search_pipelines",
+
+
+def _wiki_search_args(query: str, _project: str, _document: str, limit: int) -> dict:
+    return {"query": query, "domain": "WIKI", "pageSize": limit}
+
+
+def _code_search_args(query: str, _project: str, _document: str, _limit: int) -> dict:
+    # InternalCodeSearch requires searchType; default to code (snippets).
+    # The limit parameter is not directly supported; pagination is via
+    # the page parameter, which we leave at the default.
+    return {"query": query, "searchType": "code"}
+
+
+def _taskei_search_args(query: str, project: str, _document: str, limit: int) -> dict:
+    args: dict = {
+        "name": {"queryOperator": "contains", "value": query},
+        "pagination": {"maxResults": min(limit, 100)},
+    }
+    if project:
+        args["roomId"] = project
+    return args
+
+
+def _quip_search_args(query: str, _project: str, _document: str, limit: int) -> dict:
+    # ReadInternalWebsites does not have a search mode; we pass the
+    # quip-amazon.com search URL the user-facing MCP exposes via its
+    # URL list. ReadInternalWebsites understands the search route.
+    safe_q = query.replace(" ", "+")
+    url = f"https://quip-amazon.com/search?query={safe_q}&count={limit}"
+    return {"inputs": [url]}
+
+
+def _pipeline_search_args(query: str, _project: str, _document: str, _limit: int) -> dict:
+    # The canonical pipeline tool fetches by name, not free-text search.
+    # Treat the query as the pipeline name; the agent prompt already
+    # supplies a specific name when this action is used.
+    return {"pipelineName": query}
+
+
+_ACTION_MAP: dict[str, tuple[str, callable]] = {
+    "wiki_search": ("InternalSearch", _wiki_search_args),
+    "code_search": ("InternalCodeSearch", _code_search_args),
+    "taskei_search": ("TaskeiListTasks", _taskei_search_args),
+    "quip_search": ("ReadInternalWebsites", _quip_search_args),
+    "pipeline_search": ("GetPipelineDetails", _pipeline_search_args),
 }
 
 _VALID_ACTIONS = ", ".join(f"'{a}'" for a in _ACTION_MAP)
@@ -80,16 +130,19 @@ class BuilderMCPInput(BaseModel):
 # Tool implementation
 # ---------------------------------------------------------------------------
 class BuilderMCPTool(BaseTool):
-    """Search internal Amazon systems via builder-mcp.
+    """Search internal Amazon systems via the canonical builder-mcp server.
 
     Supports five actions: wiki_search, code_search, taskei_search,
-    quip_search, and pipeline_search. Requires BUILDER_MCP_TOKEN (or
-    MIDWAY_COOKIE_PATH) and BUILDER_MCP_ENDPOINT to be set.
+    quip_search, and pipeline_search. Requires the ``builder-mcp`` binary
+    to be installed on PATH (``toolbox install mcp-registry &&
+    mcp-registry install builder-mcp``) and a valid Midway session
+    (``mwinit -f``). Auth is handled by the binary; no env vars are
+    required from this tool.
     """
 
     name: str = "builder_mcp"
     description: str = (
-        "Search internal Amazon systems via builder-mcp. "
+        "Search internal Amazon systems via the canonical builder-mcp server. "
         "Actions: wiki_search, code_search, taskei_search, "
         "quip_search, pipeline_search."
     )
@@ -105,7 +158,7 @@ class BuilderMCPTool(BaseTool):
         document_id: str = "",
         limit: int = 10,
     ) -> str:
-        _mcp_jsonrpc.log_call(
+        _mcp_stdio.log_call(
             _CALL_LOG_PATH,
             "invocation",
             {
@@ -117,45 +170,28 @@ class BuilderMCPTool(BaseTool):
             },
         )
 
-        # --- auth ---------------------------------------------------------
-        auth = _mcp_jsonrpc.resolve_auth(
-            "MIDWAY_COOKIE_PATH", "BUILDER_MCP_TOKEN", logger
-        )
-        if auth.bearer_token is None and auth.cookie_header is None:
-            msg = (
-                "BUILDER_MCP_TOKEN not set in environment variables; "
-                "set token or MIDWAY_COOKIE_PATH to enable builder_mcp."
-            )
-            _mcp_jsonrpc.log_call(_CALL_LOG_PATH, "auth_error", {"message": msg})
-            return msg
-
-        # --- endpoint -----------------------------------------------------
-        endpoint = os.getenv("BUILDER_MCP_ENDPOINT", "").strip()
-        if not endpoint:
-            msg = (
-                "BUILDER_MCP_ENDPOINT not set in environment variables; "
-                "set it to the builder-mcp JSON-RPC endpoint URL."
-            )
-            _mcp_jsonrpc.log_call(_CALL_LOG_PATH, "config_error", {"message": msg})
-            return msg
-
         # --- clamp limit --------------------------------------------------
         limit = max(1, min(int(limit or 10), 100))
 
-        # --- dispatch and call --------------------------------------------
-        try:
-            remote_tool_name, args = self._dispatch(
-                action, query, project_id, document_id, limit
+        # --- dispatch -----------------------------------------------------
+        mapping = _ACTION_MAP.get(action)
+        if mapping is None:
+            return (
+                f"Unknown action '{action}'. "
+                f"Valid actions: {_VALID_ACTIONS}."
             )
-        except ValueError as exc:
-            # Unknown action
-            return str(exc)
+        remote_tool_name, build_args = mapping
+        arguments = build_args(query, project_id, document_id, limit)
 
+        # --- call ---------------------------------------------------------
         try:
-            result = _mcp_jsonrpc.call_mcp(
-                endpoint, auth, remote_tool_name, args, timeout=30.0
+            result = _mcp_stdio.call_stdio_mcp(
+                _BINARY_NAME,
+                remote_tool_name,
+                arguments,
+                timeout=60.0,
             )
-            _mcp_jsonrpc.log_call(
+            _mcp_stdio.log_call(
                 _CALL_LOG_PATH,
                 "response",
                 {
@@ -165,56 +201,31 @@ class BuilderMCPTool(BaseTool):
                 },
             )
             return result
-        except httpx.HTTPStatusError as exc:
-            body = exc.response.text[:300] if exc.response else ""
-            status = exc.response.status_code if exc.response else "unknown"
-            msg = f"Builder MCP error (HTTP {status}): {body}"
-            _mcp_jsonrpc.log_call(
+        except FileNotFoundError as exc:
+            msg = (
+                f"builder-mcp binary not found on PATH; install via "
+                f"'toolbox install mcp-registry && mcp-registry install builder-mcp'. "
+                f"({exc})"
+            )
+            _mcp_stdio.log_call(
                 _CALL_LOG_PATH,
-                "http_error",
-                {"action": action, "status": status, "body": body},
+                "binary_missing",
+                {"action": action, "message": str(exc)},
+            )
+            return msg
+        except asyncio.TimeoutError:
+            msg = f"Builder MCP call timed out (action={action})."
+            _mcp_stdio.log_call(
+                _CALL_LOG_PATH,
+                "timeout",
+                {"action": action},
             )
             return msg
         except Exception as exc:  # noqa: BLE001
             msg = f"Error connecting to builder_mcp: {exc}"
-            _mcp_jsonrpc.log_call(
+            _mcp_stdio.log_call(
                 _CALL_LOG_PATH,
                 "exception",
                 {"action": action, "type": type(exc).__name__, "message": str(exc)},
             )
             return msg
-
-    # -- dispatch ----------------------------------------------------------
-
-    @staticmethod
-    def _dispatch(
-        action: str,
-        query: str,
-        project_id: str,
-        document_id: str,
-        limit: int,
-    ) -> tuple[str, dict]:
-        """Map *action* to the remote MCP tool name and build the args dict.
-
-        Returns ``(remote_tool_name, arguments)`` on success.
-        Raises ``ValueError`` for unknown actions.
-        """
-        remote_tool = _ACTION_MAP.get(action)
-        if remote_tool is None:
-            raise ValueError(
-                f"Unknown action '{action}'. "
-                f"Valid actions: {_VALID_ACTIONS}."
-            )
-
-        # Base arguments shared by every action
-        args: dict = {"query": query, "limit": limit}
-
-        # Attach optional identifiers per the action mapping table
-        if action == "taskei_search" and project_id:
-            args["project_id"] = project_id
-        elif action == "quip_search" and document_id:
-            args["document_id"] = document_id
-        elif action == "pipeline_search" and project_id:
-            args["project_id"] = project_id
-
-        return remote_tool, args

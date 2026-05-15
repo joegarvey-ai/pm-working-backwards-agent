@@ -1,154 +1,217 @@
-"""Unit tests for BuilderMCPTool action mapping, retry, timeout, and call logging.
+"""Unit tests for BuilderMCPTool action mapping, error handling, and call logging.
 
-Validates: Requirements 1.2, 1.3, 7.4, 7.6
+The tool now uses the canonical Amazon ``builder-mcp`` binary over stdio
+(via ``_mcp_stdio.call_stdio_mcp``) rather than HTTP/JSON-RPC. Tests mock
+the stdio call and the PATH-availability check.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch
 
-import httpx
 import pytest
 
 from pm_agent_system.tools.builder_mcp import BuilderMCPTool
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _mock_response(status_code: int = 200, json_body: dict | None = None) -> httpx.Response:
-    """Build a mock httpx.Response with the given status and JSON body."""
-    if json_body is None:
-        json_body = {
-            "jsonrpc": "2.0",
-            "result": {
-                "content": [{"type": "text", "text": "mocked result"}],
-            },
-            "id": 1,
-        }
-    request = httpx.Request("POST", "https://fake-builder.example.com/mcp")
-    response = httpx.Response(status_code, json=json_body, request=request)
-    return response
-
-
-# ---------------------------------------------------------------------------
-# Action mapping tests: one per action, asserting the remote tool name
+# Action-to-canonical-tool mapping (mirrors _ACTION_MAP in builder_mcp.py)
 # ---------------------------------------------------------------------------
 
 _ACTION_TO_REMOTE = {
-    "wiki_search": "search_wiki",
-    "code_search": "search_code",
-    "taskei_search": "search_taskei",
-    "quip_search": "search_quip",
-    "pipeline_search": "search_pipelines",
+    "wiki_search": "InternalSearch",
+    "code_search": "InternalCodeSearch",
+    "taskei_search": "TaskeiListTasks",
+    "quip_search": "ReadInternalWebsites",
+    "pipeline_search": "GetPipelineDetails",
 }
 
 
+def _patch_binary_present():
+    """Make is_binary_available return True regardless of host PATH."""
+    return patch(
+        "pm_agent_system.tools._mcp_stdio.is_binary_available",
+        return_value=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Action mapping tests
+# ---------------------------------------------------------------------------
+
+
 class TestActionMapping:
-    """Each action dispatches to the correct remote MCP tool name."""
+    """Each action dispatches to the correct canonical builder-mcp tool."""
 
     @pytest.mark.parametrize("action,expected_remote", list(_ACTION_TO_REMOTE.items()))
     def test_action_maps_to_correct_remote_tool(
         self,
         action: str,
         expected_remote: str,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
     ) -> None:
-        monkeypatch.setenv("BUILDER_MCP_TOKEN", "test-token")
-        monkeypatch.setenv("BUILDER_MCP_ENDPOINT", "https://fake-builder.example.com/mcp")
+        captured: dict = {}
 
-        captured_payloads: list[dict] = []
-
-        def fake_post(url, *, json, headers, timeout):
-            captured_payloads.append(json)
-            return _mock_response()
+        def fake_call(binary, tool_name, arguments, args=(), timeout=60.0):
+            captured["binary"] = binary
+            captured["tool_name"] = tool_name
+            captured["arguments"] = arguments
+            return "mocked result"
 
         tool = BuilderMCPTool()
 
-        with patch("pm_agent_system.tools._mcp_jsonrpc.httpx.post", side_effect=fake_post):
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=fake_call,
+        ):
             result = tool._run(query="test query", action=action)
 
-        assert len(captured_payloads) == 1
-        payload = captured_payloads[0]
-        # The JSON-RPC envelope params.name must be the remote tool name.
-        assert payload["params"]["name"] == expected_remote
-        assert payload["method"] == "tools/call"
-        assert "test query" in str(payload["params"]["arguments"])
+        assert captured["binary"] == "builder-mcp"
+        assert captured["tool_name"] == expected_remote
+        assert "test query" in str(captured["arguments"])
+        assert result == "mocked result"
 
 
 # ---------------------------------------------------------------------------
-# Retry test: three attempts on transient HTTP 500
+# Argument-shape tests for actions whose canonical tools take structured args
 # ---------------------------------------------------------------------------
 
 
-class TestRetry:
-    """BuilderMCPTool retries three times on transient HTTP errors."""
+class TestArgumentShape:
+    """Action argument builders produce the shapes the canonical tools expect."""
 
-    def test_retries_three_times_on_http_500(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv("BUILDER_MCP_TOKEN", "test-token")
-        monkeypatch.setenv("BUILDER_MCP_ENDPOINT", "https://fake-builder.example.com/mcp")
+    def test_wiki_search_supplies_domain_wiki(self) -> None:
+        captured: dict = {}
 
-        call_count = 0
-
-        def fake_post(url, *, json, headers, timeout):
-            nonlocal call_count
-            call_count += 1
-            request = httpx.Request("POST", url)
-            response = httpx.Response(500, request=request, text="Internal Server Error")
-            response.raise_for_status()
-            return response  # never reached
+        def fake_call(binary, tool_name, arguments, args=(), timeout=60.0):
+            captured["arguments"] = arguments
+            return ""
 
         tool = BuilderMCPTool()
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=fake_call,
+        ):
+            tool._run(query="anything", action="wiki_search", limit=5)
 
-        with patch("pm_agent_system.tools._mcp_jsonrpc.httpx.post", side_effect=fake_post):
-            result = tool._run(query="retry test", action="wiki_search")
+        assert captured["arguments"]["domain"] == "WIKI"
+        assert captured["arguments"]["pageSize"] == 5
 
-        # tenacity retries 3 times total (stop_after_attempt(3)).
-        assert call_count == 3
-        # The final result is an error string, not an exception.
+    def test_code_search_supplies_searchtype_code(self) -> None:
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=60.0):
+            captured["arguments"] = arguments
+            return ""
+
+        tool = BuilderMCPTool()
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=fake_call,
+        ):
+            tool._run(query="MyClass", action="code_search")
+
+        assert captured["arguments"]["searchType"] == "code"
+        assert captured["arguments"]["query"] == "MyClass"
+
+    def test_taskei_search_uses_contains_filter(self) -> None:
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=60.0):
+            captured["arguments"] = arguments
+            return ""
+
+        tool = BuilderMCPTool()
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=fake_call,
+        ):
+            tool._run(
+                query="needle",
+                action="taskei_search",
+                project_id="room-uuid-123",
+                limit=20,
+            )
+
+        assert captured["arguments"]["name"]["queryOperator"] == "contains"
+        assert captured["arguments"]["name"]["value"] == "needle"
+        assert captured["arguments"]["roomId"] == "room-uuid-123"
+        assert captured["arguments"]["pagination"]["maxResults"] == 20
+
+    def test_pipeline_search_uses_pipelinename(self) -> None:
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=60.0):
+            captured["arguments"] = arguments
+            return ""
+
+        tool = BuilderMCPTool()
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=fake_call,
+        ):
+            tool._run(query="MyPipeline", action="pipeline_search")
+
+        assert captured["arguments"]["pipelineName"] == "MyPipeline"
+
+
+# ---------------------------------------------------------------------------
+# Error-path tests
+# ---------------------------------------------------------------------------
+
+
+class TestErrorHandling:
+    """The tool returns descriptive error strings, never raising."""
+
+    def test_missing_binary_returns_install_hint(self) -> None:
+        tool = BuilderMCPTool()
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=FileNotFoundError(
+                "'builder-mcp' is not on PATH. Install it via "
+                "'toolbox install mcp-registry && mcp-registry install builder-mcp'."
+            ),
+        ):
+            result = tool._run(query="x", action="wiki_search")
         assert isinstance(result, str)
-        assert "500" in result or "error" in result.lower()
+        assert "not found on PATH" in result
+        assert "mcp-registry install builder-mcp" in result
 
-
-# ---------------------------------------------------------------------------
-# Timeout test: default 30-second timeout reaches httpx.post
-# ---------------------------------------------------------------------------
-
-
-class TestTimeout:
-    """The default 30-second timeout is passed to httpx.post."""
-
-    def test_default_timeout_is_30_seconds(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv("BUILDER_MCP_TOKEN", "test-token")
-        monkeypatch.setenv("BUILDER_MCP_ENDPOINT", "https://fake-builder.example.com/mcp")
-
-        captured_timeouts: list[float] = []
-
-        def fake_post(url, *, json, headers, timeout):
-            captured_timeouts.append(timeout)
-            return _mock_response()
-
+    def test_timeout_returns_string(self) -> None:
         tool = BuilderMCPTool()
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=asyncio.TimeoutError(),
+        ):
+            result = tool._run(query="x", action="wiki_search")
+        assert isinstance(result, str)
+        assert "timed out" in result.lower()
 
-        with patch("pm_agent_system.tools._mcp_jsonrpc.httpx.post", side_effect=fake_post):
-            tool._run(query="timeout test", action="wiki_search")
+    def test_generic_exception_returns_string(self) -> None:
+        tool = BuilderMCPTool()
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = tool._run(query="x", action="wiki_search")
+        assert isinstance(result, str)
+        assert "boom" in result
 
-        assert len(captured_timeouts) == 1
-        assert captured_timeouts[0] == 30.0
+    def test_unknown_action_returns_descriptive_string(self) -> None:
+        tool = BuilderMCPTool()
+        with _patch_binary_present():
+            result = tool._run(query="x", action="not_a_real_action")
+        assert isinstance(result, str)
+        assert "Unknown action" in result
 
 
 # ---------------------------------------------------------------------------
-# Call logging test: invocation and response events
+# Call logging
 # ---------------------------------------------------------------------------
 
 
@@ -160,42 +223,58 @@ class TestCallLogging:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        monkeypatch.setenv("BUILDER_MCP_TOKEN", "test-token")
-        monkeypatch.setenv("BUILDER_MCP_ENDPOINT", "https://fake-builder.example.com/mcp")
-
         log_file = tmp_path / "builder_mcp_calls.log"
-        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
 
-        # Patch the module-level _CALL_LOG_PATH to use our tmp_path.
         import pm_agent_system.tools.builder_mcp as builder_mod
         monkeypatch.setattr(builder_mod, "_CALL_LOG_PATH", log_file)
 
-        def fake_post(url, *, json, headers, timeout):
-            return _mock_response()
+        def fake_call(binary, tool_name, arguments, args=(), timeout=60.0):
+            return "ok"
 
         tool = BuilderMCPTool()
-
-        with patch("pm_agent_system.tools._mcp_jsonrpc.httpx.post", side_effect=fake_post):
+        with _patch_binary_present(), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=fake_call,
+        ):
             tool._run(query="log test", action="wiki_search")
 
-        # The log file should exist and contain at least two JSON lines.
         assert log_file.exists()
         lines = log_file.read_text().strip().splitlines()
         assert len(lines) >= 2
 
         events = [json.loads(line) for line in lines]
         event_types = [e["event"] for e in events]
-
-        # First event is invocation, last is response.
         assert event_types[0] == "invocation"
         assert "response" in event_types
 
-        # Invocation event contains the action and query.
         invocation = events[0]
         assert invocation["action"] == "wiki_search"
         assert invocation["query"] == "log test"
 
-        # Response event contains response metadata.
         response_event = next(e for e in events if e["event"] == "response")
         assert "response_chars" in response_event
         assert "response_preview" in response_event
+
+    def test_logs_binary_missing_event(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        log_file = tmp_path / "builder_mcp_calls.log"
+
+        import pm_agent_system.tools.builder_mcp as builder_mod
+        monkeypatch.setattr(builder_mod, "_CALL_LOG_PATH", log_file)
+
+        tool = BuilderMCPTool()
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ), patch(
+            "pm_agent_system.tools.builder_mcp._mcp_stdio.call_stdio_mcp",
+            side_effect=FileNotFoundError("binary missing"),
+        ):
+            tool._run(query="x", action="wiki_search")
+
+        events = [json.loads(line) for line in log_file.read_text().splitlines()]
+        event_types = [e["event"] for e in events]
+        assert "binary_missing" in event_types

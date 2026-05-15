@@ -102,13 +102,15 @@ logger = logging.getLogger(__name__)
 
 
 def _builder_mcp_enabled() -> bool:
-    """True when builder-mcp auth material is present."""
-    if os.getenv("BUILDER_MCP_TOKEN", "").strip():
-        return True
-    cookie_path = os.getenv("MIDWAY_COOKIE_PATH", "").strip()
-    if cookie_path and Path(cookie_path).exists():
-        return True
-    return False
+    """True when the canonical ``builder-mcp`` binary is on PATH.
+
+    Auth (Midway cookie) is handled by the binary itself, so the only
+    gate at this layer is whether the binary is installed and reachable.
+    Outside Amazon (or before ``mcp-registry install builder-mcp``), the
+    binary is absent and the tool stays unregistered.
+    """
+    import shutil
+    return shutil.which("builder-mcp") is not None
 
 
 def _outlook_mcp_enabled() -> bool:

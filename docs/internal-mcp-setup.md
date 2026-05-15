@@ -15,6 +15,27 @@ include internal technical context that public web searches cannot reach.
 
 **Agents that use it:** `external_research_agent`, `brd_agent`
 
+The pipeline talks to the canonical Amazon `builder-mcp` server (a
+stdio MCP binary distributed by ASBX). No environment variables are
+required. The tool is enabled automatically when the `builder-mcp`
+binary is on PATH. Auth is handled by the binary using your Midway
+session.
+
+**Install on a Cloud Desktop or internal Linux dev box:**
+
+```bash
+toolbox install mcp-registry && mcp-registry install builder-mcp
+mwinit -f
+```
+
+After installation, run `which builder-mcp` to confirm the binary is on
+PATH. The pipeline registers `BuilderMCPTool` automatically on the next
+run.
+
+When the binary is not installed (the OSS variant of the pipeline, or
+any environment without ASBX tooling), the tool stays unregistered and
+the pipeline runs unchanged.
+
 ### Outlook MCP
 
 Outlook MCP connects the PRFAQ and BRD agents to calendar, email metadata,
@@ -126,12 +147,15 @@ specified path.
 
 A healthy configuration looks like one of these patterns:
 
-- **Token-based auth:** `BUILDER_MCP_TOKEN` is SET, `BUILDER_MCP_ENDPOINT`
-  is SET, `MIDWAY_COOKIE_PATH` is UNSET.
-- **Cookie-based auth:** `MIDWAY_COOKIE_PATH` is SET (file exists),
-  `BUILDER_MCP_ENDPOINT` is SET, `BUILDER_MCP_TOKEN` is UNSET.
-- **Disabled:** All five MCP variables are UNSET. The pipeline runs
-  without internal MCP tools.
+- **Builder MCP enabled:** `which builder-mcp` returns a path, and
+  `mwinit -f` was run within the cookie lifetime. Outlook MCP env vars
+  may be set or unset independently.
+- **Outlook MCP enabled (token):** `OUTLOOK_MCP_TOKEN` is SET,
+  `OUTLOOK_MCP_ENDPOINT` is SET.
+- **Outlook MCP enabled (cookie):** `MIDWAY_COOKIE_PATH` is SET (file
+  exists), `OUTLOOK_MCP_ENDPOINT` is SET, `OUTLOOK_MCP_TOKEN` is UNSET.
+- **Disabled:** the `builder-mcp` binary is not on PATH and Outlook MCP
+  variables are unset. The pipeline runs without internal MCP tools.
 
 ---
 
@@ -158,15 +182,19 @@ team's internal documentation for the correct values of
 When authentication fails, the tools return descriptive error strings
 instead of raising exceptions. Common messages:
 
-- `"BUILDER_MCP_TOKEN not set in environment variables; set token or
-  MIDWAY_COOKIE_PATH to enable builder_mcp."` means neither the token
-  nor the cookie path resolved to valid credentials.
-- `"Builder MCP error (HTTP 401): ..."` or `"Builder MCP error
-  (HTTP 403): ..."` means the token or cookie was rejected by the
-  server. Refresh the cookie with `mwinit -f` or check that the token
-  is still valid.
-- The same patterns apply to Outlook MCP with `OUTLOOK_MCP_TOKEN` and
-  `outlook_mcp` substituted.
+- `"builder-mcp binary not found on PATH; install via 'toolbox install
+  mcp-registry && mcp-registry install builder-mcp'."` means the
+  canonical Amazon binary is not installed or not on PATH.
+- `"Error connecting to builder_mcp: ..."` means the binary started but
+  the call failed. Check the call log under
+  `output/builder_mcp_calls.log` for the full error type. Common cause:
+  expired Midway session — re-run `mwinit -f`.
+- `"Builder MCP call timed out (action=...)."` means a single call
+  exceeded the per-call timeout. Re-run with a more specific query.
+- For Outlook MCP, the original token-and-endpoint error patterns
+  still apply: `"OUTLOOK_MCP_TOKEN not set in environment variables;
+  set token or MIDWAY_COOKIE_PATH to enable outlook_mcp."` and
+  `"Outlook MCP error (HTTP 401|403): ..."`.
 
 ### Per-tool call logs
 
