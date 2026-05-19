@@ -1,0 +1,16 @@
+# Normalize line endings on commit; check out with LF on every platform.
+# Without this, Windows/WSL editors flip every file to CRLF and the diff
+# becomes unreadable.
+* text=auto eol=lf
+
+# Treat lockfiles and recordings as text but don't try to merge them.
+uv.lock          text eol=lf -merge
+tests/recordings/*.json text eol=lf -merge
+
+# Binaries — never normalize.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.ico  binary

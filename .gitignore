@@ -18,3 +18,8 @@ input/*
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Personal Kiro hooks with hardcoded user paths (e.g., Obsidian publish/sync).
+# These are local automation, not team-shareable. Keep them on disk but out of git.
+.kiro/hooks/publish-specs-obsidian.kiro.hook
+.kiro/hooks/sync-specs-obsidian.kiro.hook
