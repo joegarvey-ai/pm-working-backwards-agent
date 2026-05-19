@@ -29,16 +29,26 @@ Optional but recommended:
 8. Business Context (current-state metrics)
 
 ## Process
-1. If input is incomplete, ask the PM to fill gaps before proceeding
-2. Challenge the PM's assumptions with 5 hard questions (can be skipped with `--skip-validation`)
-3. Research using Tavily search for external data
-4. Cross-reference with any internal documents provided
-5. Produce a structured research brief with inline citations
+1. If input is incomplete, ask the PM to fill gaps before proceeding. Never invent details — record gaps explicitly.
+2. Show the PM the structured input brief and wait for explicit approval before running research.
+3. Challenge the PM's assumptions with 5 hard questions (can be skipped with `--skip-validation`).
+4. Research using Tavily search for external data.
+5. Cross-reference with any internal documents provided.
+6. Produce a structured research brief with inline citations.
+7. Stop. Read the output, summarize in 3-5 sentences, and wait for the PM to approve before the next stage.
 
 ## Running via CLI
+In conversational mode, always pass `--skip-validation` so the CLI's
+interactive prompts don't fight the agent's review conversation:
+
+```
+uv run pm_agent_system research examples/input.yaml --skip-validation
+```
+
+For automation only (no human review needed) the prompt-mode form exists:
+
 ```
 uv run pm_agent_system research examples/input.yaml
-uv run pm_agent_system research examples/input.yaml --skip-validation
 ```
 
 ## Output Structure

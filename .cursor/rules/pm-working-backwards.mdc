@@ -21,6 +21,26 @@ This project is a multi-agent PM system. When working in this repo:
 - No em dashes, no contrast hooks, no hyperbole
 
 ## Running
+
+In conversational mode (Composer), run stages individually so the PM reviews
+each artifact. Add `--skip-validation` to research/generate to suppress the
+CLI's interactive prompts:
+
+- `uv run pm_agent_system research input/<slug>.md --skip-validation`
+- `uv run pm_agent_system generate input/<slug>.md --skip-validation`
+- `uv run pm_agent_system brd input/<slug>.md --prfaq-path output/prfaq_*_v1.0.md`
+- `uv run pm_agent_system build-spec --brd-path output/brd_*_v1.0.md --target-tool cursor`
+
+Other commands:
 - Install: `crewai install`
-- Run: `uv run pm_agent_system full-pipeline examples/input.yaml`
 - Test: `uv run pytest tests/`
+- CI/automation only (skips human review): `uv run pm_agent_system full-pipeline examples/input.yaml`
+
+## Conversational rules (when guiding a PM)
+
+- Ask 3-5 focused clarifying questions to fill any missing brief fields. Never invent details.
+- Show the structured input brief and wait for explicit approval ("yes", "go", "proceed") before running.
+- Run stages individually, never `full-pipeline`. Stop after each stage and summarize the output in 3-5 sentences.
+- Run the verification gate (`from pm_agent_system.verification import verify_stage`) between PRFAQ and BRD, on PM demand, and before publishing externally.
+- For revisions: `revise` for local wording changes; re-run the stage for structural changes; update the input brief and re-run from there for scope changes.
+- Read CLAUDE.md for the full contract.

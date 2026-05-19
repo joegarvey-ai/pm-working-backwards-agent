@@ -28,7 +28,15 @@ Each skill includes `#[[file:...]]` references that pull the actual source files
 ## Running the Pipeline
 
 ### Option 1: Custom Agent (recommended for guided workflow)
-In the IDE, select the `pm-working-backwards` agent. It guides you through the full pipeline conversationally, pausing for your review at each step.
+In the IDE, select the `pm-working-backwards` agent. It guides you through
+the full pipeline conversationally, pausing for your review at each step.
+The agent's contract:
+
+- Asks 3-5 clarifying questions to fill the input brief, never invents details
+- Shows you the structured brief and waits for explicit approval before running research
+- Runs each stage individually (research → PRFAQ → BRD → build spec)
+- Pauses after every stage; you approve or revise before the next one starts
+- Runs the verification gate automatically before BRD, and on demand if you ask "is this ready?"
 
 ### Option 2: Individual Skills
 Activate a specific skill by mentioning it in chat:
@@ -42,10 +50,22 @@ You can also type `#research-agent`, `#prfaq-agent`, or `#brd-build-spec-agent` 
 
 The BRD stage runs three async siblings in parallel (`brd_structure_task`, `brd_cost_risk_task`, `brd_compliance_task`). Their outputs merge into `BRDOutput` via `brd_assembly_task`. The compliance sibling handles data classification, vendor considerations, privacy, compliance gates, launch readiness, and post-launch maintenance. STRIDE threat-model stubs and RACI matrices render deterministically after the build spec, not by the LLM.
 
-### Option 3: CLI Pipeline
-The Python CLI works from Kiro's terminal:
+### Option 3: CLI Pipeline (automation only — skips human review)
+The Python CLI works from Kiro's terminal. The conversational agent is the
+recommended path for PMs; this form is for CI/automation only:
+
 ```
 uv run pm_agent_system full-pipeline examples/input.yaml --target-tool kiro
+```
+
+For PM-driven runs from the terminal, prefer per-stage commands so you
+review each artifact:
+
+```
+uv run pm_agent_system research input/my-product.md --skip-validation
+uv run pm_agent_system generate input/my-product.md --skip-validation
+uv run pm_agent_system brd input/my-product.md --prfaq-path output/prfaq_*_v1.0.md
+uv run pm_agent_system build-spec --brd-path output/brd_*_v1.0.md --target-tool kiro
 ```
 
 ## Build Spec Integration
