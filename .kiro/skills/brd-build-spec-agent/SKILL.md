@@ -18,10 +18,11 @@ Takes the approved PRFAQ and research, produces a 12-section BRD with code sampl
 - Example Kiro-formatted build spec: #[[file:examples/build_spec_kiro_formatted.md]]
 
 ## Running via CLI
-```
-# Full pipeline (research + PRFAQ + BRD + build spec)
-uv run pm_agent_system full-pipeline examples/input.yaml --target-tool kiro
 
+In conversational mode (Claude Code, Kiro, Cursor) prefer per-stage commands so
+the PM reviews each artifact:
+
+```
 # BRD from approved PRFAQ
 uv run pm_agent_system brd examples/input.yaml --prfaq-path output/prfaq_foo_v1.0.md
 
@@ -30,6 +31,13 @@ uv run pm_agent_system build-spec --brd-path output/brd_foo_v1.0.md --target-too
 
 # Revise existing BRD
 uv run pm_agent_system revise-brd --brd-path output/brd_foo_v1.0.md --context-text "Add GDPR requirements"
+```
+
+For automation/CI only, the legacy `full-pipeline` command exists but skips
+human-in-the-loop review:
+
+```
+uv run pm_agent_system full-pipeline examples/input.yaml --target-tool kiro
 ```
 
 ## BRD Output (12 sections)
@@ -58,3 +66,11 @@ uv run pm_agent_system revise-brd --brd-path output/brd_foo_v1.0.md --context-te
 - Code samples show canonical patterns (API contracts, data models, Mermaid diagrams)
 - Cost flags identify decisions with cost implications, never estimate dollar amounts
 - No ambiguous language: "fast" needs a latency target, "intuitive" needs a metric
+
+## Verification Gate (run BEFORE starting this skill)
+- Do not start BRD generation until the PRFAQ verification gate has passed
+  (or the PM has explicitly accepted the warnings)
+- Call `verify_stage(stage_output=<prfaq>, input_brief=<brief>, stage_name="prfaq")`
+  from `src/pm_agent_system/verification.py`
+- If the gate fails, surface issues to the PM and offer to revise the PRFAQ
+  before proceeding — do not silently move on

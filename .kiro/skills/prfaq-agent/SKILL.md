@@ -49,3 +49,12 @@ uv run pm_agent_system revise --prfaq-path output/prfaq_foo_v1.0.md --context-pa
 - Confirm which sections to revise before rewriting
 - Update ONLY the specified sections
 - Bump the version number
+
+## Verification Gate (run after this skill produces output)
+- The PRFAQ stage is the gated boundary: run `verify_stage(...)` from
+  `src/pm_agent_system/verification.py` before starting the BRD stage
+- Trigger automatically between PRFAQ and BRD; on user demand ("is this ready?");
+  before publishing externally
+- Report issues conversationally — em dashes, missing citations, contrast
+  hooks, customer-evidence gaps — never paste raw verifier JSON
+- If the user accepts warnings, log that they accepted; do not silently advance

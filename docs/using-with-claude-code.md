@@ -83,12 +83,22 @@ uv run pm_agent_system generate input/my-product.md --skip-validation
 ```
 > "The PRFAQ draft is ready. The press release leads with the 60% support ticket reduction claim. The internal FAQ addresses pricing, competitive positioning, and the build-vs-buy decision. Should I run the verification gate before we proceed to the BRD?"
 
-**Verification (optional but recommended):**
+**Verification gate (auto between PRFAQ and BRD):**
+
+Claude Code runs the gate as a Python call (there's no top-level CLI subcommand for it):
+
 ```python
 from pm_agent_system.verification import verify_stage
-# Claude Code runs this and reports issues
+result = verify_stage(
+    stage_output=open("output/prfaq_*_v1.0.md").read(),
+    input_brief=open("input/my-product.md").read(),
+    stage_name="prfaq",
+)
 ```
+
 > "The verification gate passed with 2 warnings: one em dash in the press release and a customer quote that's marked as placeholder since we don't have actual customer evidence yet. Want me to fix these before moving to BRD, or proceed as-is?"
+
+The gate runs automatically before BRD. Claude Code also runs it on demand when you ask "is this ready?", "should I share this?", or before you publish externally.
 
 **BRD stage:**
 ```bash
@@ -127,7 +137,9 @@ These rules ensure Claude Code behaves correctly when working in this project. T
 
 7. **When the user gives revision feedback, pick the right command.** Minor wording changes: use `revise`. Structural changes that affect downstream artifacts: re-run the stage. Scope changes (new constraint, different customer): update the input brief and re-run from that point.
 
-8. **Run the verification gate when the user asks "is this ready?"** or between PRFAQ and BRD stages. Report issues conversationally.
+8. **Run the verification gate when the user asks "is this ready?"** or between PRFAQ and BRD stages. Report issues conversationally — never paste raw verifier JSON. Trigger conditions are: (a) always between PRFAQ and BRD, (b) when the user asks about readiness, (c) before publishing externally.
+
+9. **Pick the right revision tool** when the user gives feedback. Wording or single-section content → `revise` / `revise-brd` with `--context-text`. Structural change that affects downstream artifacts → re-run the stage. Scope change (new constraint, different customer) → update the input brief and re-run from there. Cross-stage inconsistency → run the verification gate, then revise the older artifact first. Default to `revise` when the change is local; re-run only when the change invalidates downstream context.
 
 ## Quick reference: CLI commands
 
