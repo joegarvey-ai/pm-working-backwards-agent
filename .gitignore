@@ -23,3 +23,6 @@ input/*
 # These are local automation, not team-shareable. Keep them on disk but out of git.
 .kiro/hooks/publish-specs-obsidian.kiro.hook
 .kiro/hooks/sync-specs-obsidian.kiro.hook
+
+# Internal Amazon reference material — not for a public-facing repo. Keep local.
+Internal training document_Amazon GitHub Requirements.txt
