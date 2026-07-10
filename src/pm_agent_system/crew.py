@@ -35,6 +35,7 @@ from pm_agent_system.tools import (
     RequirementsReaderTool,
     StyleGuideLoaderTool,
     TavilySearchTool,
+    WorkingBackwardsAICritiqueTool,
 )
 import logging
 import os
@@ -138,6 +139,19 @@ def _outlook_mcp_enabled() -> bool:
     return shutil.which("aws-outlook-mcp") is not None
 
 
+def _wb_ai_enabled() -> bool:
+    """True when the Working Backwards AI MCP client binary is on PATH.
+
+    The critique tool speaks stdio to the internal Working Backwards AI
+    service via an MCP Gateway client binary (default ``wb-ai-mcp``,
+    override with ``WB_AI_MCP_BINARY``), which handles Midway auth itself.
+    Absent outside Amazon, so the tool stays unregistered there.
+    """
+    import shutil
+    binary = os.getenv("WB_AI_MCP_BINARY", "wb-ai-mcp").strip() or "wb-ai-mcp"
+    return shutil.which(binary) is not None
+
+
 @CrewBase
 class PmAgentSystem:
     """PM Agent System crew.
@@ -166,10 +180,13 @@ class PmAgentSystem:
         _dovetail = "enabled" if os.getenv("DOVETAIL_API_TOKEN", "").strip() else "disabled"
         _builder = "enabled" if _builder_mcp_enabled() else "disabled"
         _outlook = "enabled" if _outlook_mcp_enabled() else "disabled"
+        _wb_ai = "enabled" if _wb_ai_enabled() else "disabled"
         logger.info(
-            "Optional integrations: builder_mcp=%s, outlook_mcp=%s, dovetail=%s",
+            "Optional integrations: builder_mcp=%s, outlook_mcp=%s, "
+            "working_backwards_ai=%s, dovetail=%s",
             _builder,
             _outlook,
+            _wb_ai,
             _dovetail,
         )
 
@@ -242,6 +259,8 @@ class PmAgentSystem:
         ]
         if _outlook_mcp_enabled():
             tools.append(OutlookMCPTool())
+        if _wb_ai_enabled():
+            tools.append(WorkingBackwardsAICritiqueTool())
         return Agent(
             config=self.agents_config["prfaq_agent"],  # type: ignore[index]
             tools=tools,

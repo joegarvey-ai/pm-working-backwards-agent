@@ -27,6 +27,7 @@ def _mcp_disabled(monkeypatch):
     """
     monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
     monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._wb_ai_enabled", lambda: False)
 
 
 def _tool_class_names(agent) -> list[str]:
@@ -66,7 +67,11 @@ _BRD_BASELINE = [
     "ObsidianReadTool",
 ]
 
-_MCP_TOOL_NAMES = {"BuilderMCPTool", "OutlookMCPTool"}
+_MCP_TOOL_NAMES = {
+    "BuilderMCPTool",
+    "OutlookMCPTool",
+    "WorkingBackwardsAICritiqueTool",
+}
 
 
 def test_full_pipeline_crew_builds_without_mcp(monkeypatch):
