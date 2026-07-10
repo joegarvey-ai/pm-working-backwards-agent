@@ -487,8 +487,23 @@ def read_current_version(filepath: Path) -> str:
 
 
 def bump_version(version: str) -> str:
-    major, minor = version.split(".")
-    return f"{major}.{int(minor) + 1}"
+    """Increment the minor component of an ``X.Y`` version string.
+
+    Tolerates versions that are not exactly ``major.minor``: a single
+    component (``"2"``) is treated as ``2.0`` and bumped to ``2.1``; extra
+    or non-numeric components (``"1.0.0"``, ``"1.0-beta"``) fall back to
+    bumping the first numeric-looking minor, or to ``<version>.1`` when no
+    numeric minor is present. Never raises on a malformed frontmatter or
+    LLM-emitted version.
+    """
+    parts = str(version).split(".")
+    major = parts[0] if parts and parts[0] else "1"
+    minor_raw = parts[1] if len(parts) > 1 else "0"
+    try:
+        minor = int("".join(c for c in minor_raw if c.isdigit()) or "0")
+    except ValueError:
+        minor = 0
+    return f"{major}.{minor + 1}"
 
 
 # ---------- Subcommand: research ----------
@@ -2585,12 +2600,75 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Commands that produce fresh output and may run the retention sweep first.
+# Read commands (brd, build-spec, revise*, wireframes*) resolve a
+# user-supplied path out of output/, so sweeping first can archive the very
+# file they are about to read; they are excluded. clean/diff/view/feedback
+# do not write pipeline artifacts.
+_RETENTION_SWEEP_COMMANDS = frozenset({"research", "generate", "full-pipeline"})
+
+# Commands that call an LLM and therefore need a model provider key.
+_LLM_COMMANDS = frozenset({
+    "research", "generate", "revise", "full-pipeline", "brd", "build-spec",
+    "revise-brd", "wireframes", "revise-wireframes", "feedback",
+})
+# Commands that reach the web via Tavily and therefore need a Tavily key.
+_TAVILY_COMMANDS = frozenset({"research", "generate", "full-pipeline", "brd"})
+
+_PLACEHOLDER_MARKERS = ("your_", "_here", "changeme", "xxxx")
+
+
+def _is_placeholder(value: str) -> bool:
+    v = value.strip().lower()
+    return not v or any(marker in v for marker in _PLACEHOLDER_MARKERS)
+
+
+def _preflight_check(command: str | None) -> None:
+    """Fail fast with an actionable message when a required key is missing.
+
+    Runs before any crew kickoff so the common first-run failure (missing,
+    mistyped, or placeholder API key) surfaces as the message SETUP.md
+    promises instead of an opaque exception mid-run. Only gates commands
+    that actually call the relevant service.
+    """
+    if command not in _LLM_COMMANDS:
+        return
+
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    if provider == "bedrock":
+        if _is_placeholder(os.getenv("AWS_BEARER_TOKEN_BEDROCK", "")):
+            print("AWS_BEARER_TOKEN_BEDROCK not set")
+            print(
+                "LLM_PROVIDER=bedrock requires a Bedrock API key. Set "
+                "AWS_BEARER_TOKEN_BEDROCK in your .env (see .env.example)."
+            )
+            sys.exit(1)
+    else:
+        if _is_placeholder(os.getenv("ANTHROPIC_API_KEY", "")):
+            print("ANTHROPIC_API_KEY not set")
+            print(
+                "Add your Anthropic API key to .env. The line should read "
+                "ANTHROPIC_API_KEY=sk-ant-... with no spaces around the =. "
+                "See SETUP.md Step 6."
+            )
+            sys.exit(1)
+
+    if command in _TAVILY_COMMANDS and _is_placeholder(os.getenv("TAVILY_API_KEY", "")):
+        print("TAVILY_API_KEY not set")
+        print(
+            "The research agent needs a Tavily API key for web search. Add "
+            "TAVILY_API_KEY=tvly-... to .env. See SETUP.md Step 6."
+        )
+        sys.exit(1)
+
+
 def run():
     """CLI entry point."""
     load_dotenv()
     parser = _build_parser()
     args = parser.parse_args()
-    if args.command not in ("clean", "diff"):
+    _preflight_check(args.command)
+    if args.command in _RETENTION_SWEEP_COMMANDS:
         enforce_retention_policy(_output_dir(), archive_after_days=_retention_days())
     args.func(args)
 

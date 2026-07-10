@@ -54,19 +54,29 @@ def latest_artifact_path(artifact: ArtifactType) -> Path | None:
     if not out.is_dir():
         return None
 
-    candidates = []
+    versioned = []
+    unversioned = []
     for md_path in out.glob(f"{prefix}*.md"):
+        # Skip the .html siblings and any archived copies.
         match = _VERSION_RE.search(md_path.name)
         if match:
             major = int(match.group(1))
             minor = int(match.group(2))
-            candidates.append(((major, minor), md_path))
+            versioned.append(((major, minor), md_path))
+        else:
+            unversioned.append(md_path)
 
-    if not candidates:
-        return None
+    if versioned:
+        versioned.sort(reverse=True)
+        return versioned[0][1]
 
-    candidates.sort(reverse=True)
-    return candidates[0][1]
+    # research_brief_{timestamp}.md and build_spec_{slug}_{tool}.md carry no
+    # _vX.Y suffix, so fall back to the newest matching file by mtime. Without
+    # this the feedback classifier is permanently blind to those two artifacts.
+    if unversioned:
+        return max(unversioned, key=lambda p: p.stat().st_mtime)
+
+    return None
 
 
 def _strip_frontmatter(content: str) -> str:
