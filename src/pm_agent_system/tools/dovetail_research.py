@@ -25,9 +25,25 @@ from typing import Type
 import httpx
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry only transient failures.
+
+    Transport-level errors (timeouts, connection resets) and server-side or
+    rate-limit HTTP statuses (429, 5xx) are worth retrying. Other 4xx
+    responses (400/401/403/404) are not — a retry cannot fix a bad request,
+    expired auth, or a missing resource, so we fast-fail instead of burning
+    ~6s of exponential backoff before failing anyway.
+    """
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    return False
 
 
 # Dedicated file logger for Dovetail tool invocations. Writes to
@@ -52,7 +68,12 @@ def _log_call(event: str, details: dict) -> None:
         pass
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+@retry(
+    retry=retry_if_exception(_is_retryable),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 def _dovetail_post_with_retry(url, json_payload, headers, timeout):
     response = httpx.post(url, json=json_payload, headers=headers, timeout=timeout)
     response.raise_for_status()

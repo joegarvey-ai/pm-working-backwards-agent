@@ -51,3 +51,34 @@ def test_identical_documents_report_no_differences(tmp_path):
     result = diff_markdown_versions(str(old), str(new))
 
     assert "No differences" in result
+
+
+def test_duplicate_headings_are_not_collapsed(tmp_path):
+    """Two sections sharing a heading must both be diffed. Previously the
+    second occurrence overwrote the first in the section dict, so a change
+    to the first section was silently reported as 'No differences'."""
+    old = _write(
+        tmp_path, "old.md", "## Notes\n\nFirst note.\n\n## Notes\n\nSecond note.\n"
+    )
+    new = _write(
+        tmp_path,
+        "new.md",
+        "## Notes\n\nFirst note EDITED with extra words.\n\n## Notes\n\nSecond note.\n",
+    )
+
+    result = diff_markdown_versions(str(old), str(new))
+
+    assert "No differences" not in result
+    assert "CHANGED" in result
+    assert "Notes" in result
+
+
+def test_duplicate_heading_removal_is_reported(tmp_path):
+    """Dropping the second of two same-named sections is reported as REMOVED,
+    disambiguated by an occurrence suffix rather than silently ignored."""
+    old = _write(tmp_path, "old.md", "## Notes\n\nAAA.\n\n## Notes\n\nBBB.\n")
+    new = _write(tmp_path, "new.md", "## Notes\n\nAAA.\n")
+
+    result = diff_markdown_versions(str(old), str(new))
+
+    assert "REMOVED" in result

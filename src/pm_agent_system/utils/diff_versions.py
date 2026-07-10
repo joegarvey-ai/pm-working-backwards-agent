@@ -45,24 +45,36 @@ def diff_markdown_versions(old_path: str, new_path: str) -> str:
 
 
 def _split_sections(text: str) -> dict[str, str]:
-    """Split markdown into sections by ## headings."""
+    """Split markdown into sections by ## headings.
+
+    Duplicate heading text is disambiguated with an occurrence suffix
+    (e.g. ``Notes (#2)``) so repeated headings are not silently collapsed
+    into a single dict entry, which would drop a section from the diff.
+    """
     text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.DOTALL)
 
     sections: dict[str, str] = {}
+    seen: dict[str, int] = {}
     current_heading = "(preamble)"
     current_lines: list[str] = []
+
+    def _flush(heading: str, lines: list[str]) -> None:
+        count = seen.get(heading, 0)
+        seen[heading] = count + 1
+        key = heading if count == 0 else f"{heading} (#{count + 1})"
+        sections[key] = "\n".join(lines)
 
     for line in text.split("\n"):
         match = re.match(r"^(#{1,3})\s+(.+)", line)
         if match:
             if current_lines:
-                sections[current_heading] = "\n".join(current_lines)
+                _flush(current_heading, current_lines)
             current_heading = match.group(2).strip()
             current_lines = []
         else:
             current_lines.append(line)
 
     if current_lines:
-        sections[current_heading] = "\n".join(current_lines)
+        _flush(current_heading, current_lines)
 
     return sections

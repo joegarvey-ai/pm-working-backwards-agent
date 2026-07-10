@@ -15,6 +15,8 @@ from pathlib import Path
 
 import yaml
 
+from pm_agent_system.utils.text_io import read_text_lenient
+
 
 # ---------- Field mapping ----------
 
@@ -57,9 +59,15 @@ def detect_input_format(file_path: str) -> str:
 
 
 def parse_yaml_input(file_path: str) -> dict:
-    """Load a YAML input file into a dict."""
-    content = Path(file_path).read_text(encoding="utf-8")
-    return yaml.safe_load(content) or {}
+    """Load a YAML input file into a dict.
+
+    A top-level scalar or list (i.e. not a mapping) returns ``{}`` so that
+    ``validate_input`` reports the missing required fields cleanly instead of
+    raising ``AttributeError`` on a later ``.get()``.
+    """
+    content = read_text_lenient(file_path)
+    data = yaml.safe_load(content)
+    return data if isinstance(data, dict) else {}
 
 
 # ---------- Markdown ----------
@@ -90,7 +98,7 @@ def parse_markdown_input(file_path: str) -> dict:
     - Heading match is case-insensitive
     - Empty fields (only whitespace/comments) → None
     """
-    raw = Path(file_path).read_text(encoding="utf-8")
+    raw = read_text_lenient(file_path)
     body = _strip_frontmatter(raw)
 
     result: dict[str, str | None] = {}
