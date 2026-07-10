@@ -563,6 +563,37 @@ class PmAgentSystem:
             verbose=True,
         )
 
+    def generate_from_research_crew(self) -> Crew:
+        """Agent 2 only — produce a PRFAQ from an existing research brief on disk.
+
+        Reuses the generate_prfaq task body verbatim (single source of truth
+        for the PRFAQ structure) but reads the ResearchOutput from
+        ``{research_path}`` via file_reader instead of from prior-task
+        context. Lets a PM who already has a research brief skip Agent 1.
+        """
+        cfg = dict(self.tasks_config["generate_prfaq"])  # type: ignore[index]
+        preamble = (
+            "Before anything else, read the approved research brief from the "
+            "file at {research_path} using the file_reader tool. Treat its "
+            "contents as the ResearchOutput this task refers to below: it is "
+            "the single source of truth for facts, competitors, customer "
+            "quotes, and gaps. Wherever the steps below say 'read the "
+            "ResearchOutput from prior task context', use the file you just "
+            "read instead.\n\n"
+        )
+        cfg["description"] = preamble + cfg["description"]
+        prfaq_task = Task(
+            config=cfg,
+            output_pydantic=PRFAQOutput,
+            name="generate_prfaq",
+        )
+        return Crew(
+            agents=[self.prfaq_agent()],
+            tasks=[prfaq_task],
+            process=Process.sequential,
+            verbose=True,
+        )
+
     def revise_prfaq_crew(self) -> Crew:
         """Agent 2 only (PRFAQ Mode 2)."""
         return Crew(
@@ -718,25 +749,32 @@ class PmAgentSystem:
             verbose=True,
         )
 
-    def split_brd_crew(self) -> Crew:
+    def split_brd_crew(self, sequential_brd: bool = False) -> Crew:
         """Agent 4 only — three-task split BRD from approved PRFAQ on disk.
 
-        Task 1 (structure) and Task 2 (cost_risk) run in PARALLEL via
-        async_execution=True. Each has its own dedicated agent to
-        avoid Bedrock tool-use/tool-result interleaving (same pattern
-        as 4A). Task 3 (assembly) waits on both and merges into the
-        final BRDOutput.
+        Task 1 (structure), Task 2 (cost_risk), and Task 3 (compliance)
+        run in PARALLEL via async_execution=True. Each has its own
+        dedicated agent to avoid Bedrock tool-use/tool-result
+        interleaving (same pattern as 4A). Task 4 (assembly) waits on all
+        three and merges into the final BRDOutput.
+
+        When ``sequential_brd`` is True the three siblings run
+        sequentially instead of in parallel. Slower, but eliminates the
+        Bedrock toolResult interleaving race; the CLI auto-enables this
+        when LLM_PROVIDER=bedrock.
 
         Task 1: BRDStructureOutput (prose, user stories, requirements).
         Task 2: BRDCostRiskOutput (cost flags, risks, metrics, timeline).
-        Task 3: merge both into final BRDOutput.
+        Task 3: BRDComplianceOutput (data handling, gates, readiness).
+        Task 4: merge all three into final BRDOutput.
         """
+        brd_async = not sequential_brd
         structure_task = Task(
             config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
             output_pydantic=BRDStructureOutput,
             name="brd_structure_task",
             agent=self.brd_agent(),
-            async_execution=True,
+            async_execution=brd_async,
         )
         cost_risk_task = Task(
             config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
@@ -745,7 +783,7 @@ class PmAgentSystem:
             # research from disk directly so it can run in parallel.
             name="brd_cost_risk_task",
             agent=self.brd_cost_risk_agent(),
-            async_execution=True,
+            async_execution=brd_async,
         )
         compliance_task = Task(
             config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
@@ -754,7 +792,7 @@ class PmAgentSystem:
             # disk via FileReaderTool so it can run in parallel.
             name="brd_compliance_task",
             agent=self.brd_compliance_agent(),
-            async_execution=True,
+            async_execution=brd_async,
         )
         assembly_task = Task(
             config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]

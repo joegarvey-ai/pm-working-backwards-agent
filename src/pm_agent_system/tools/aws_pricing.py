@@ -10,6 +10,7 @@ generation, which typically makes 2-5 lookups per run).
 
 import json
 import logging
+import os
 from typing import Optional
 
 import boto3
@@ -163,7 +164,10 @@ class AWSPricingTool(BaseTool):
         "Returns: pricing tiers and per-unit costs for the specified service in the given region."
     )
 
-    region: str = Field(default="us-east-1", exclude=True)
+    region: str = Field(
+        default_factory=lambda: os.getenv("AWS_PRICING_REGION", "us-east-1"),
+        exclude=True,
+    )
 
     def _run(
         self,
@@ -185,7 +189,7 @@ class AWSPricingTool(BaseTool):
         resolved = _resolve_service_code(service_code)
 
         try:
-            client = _build_client()
+            client = _build_client(target_region)
         except Exception as exc:
             return (
                 f"Failed to create AWS Pricing API client: {exc}. "
