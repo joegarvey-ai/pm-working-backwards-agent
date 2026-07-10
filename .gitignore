@@ -26,3 +26,8 @@ input/*
 
 # Internal Amazon reference material — not for a public-facing repo. Keep local.
 Internal training document_Amazon GitHub Requirements.txt
+
+# Personal session recaps and publish one-offs with internal context and
+# hardcoded local paths. Local working notes, not for a public repo.
+docs/recaps/
+scripts/publish_*.py
