@@ -94,8 +94,13 @@ Return ONLY the JSON object, no other text."""
 
 
 def _call_verifier(system_prompt: str, user_prompt: str) -> str:
-    """Call the verification model (Haiku) and return response text."""
-    provider = os.getenv("LLM_PROVIDER", "bedrock").strip().lower()
+    """Call the verification model (Haiku) and return response text.
+
+    Defaults to the same provider as the crew (anthropic) so a
+    default-configured user (ANTHROPIC_API_KEY, no AWS creds) does not
+    hit a Bedrock credentials failure when the gate runs.
+    """
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
 
     if provider == "bedrock":
         return _call_verifier_bedrock(system_prompt, user_prompt)

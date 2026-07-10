@@ -8,12 +8,74 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+# Filenames (case-insensitive) and substrings that name credential material.
+# Refused even inside an allowed root, as defense in depth.
+_SECRET_NAMES = {
+    ".env",
+    "credentials",
+    "id_rsa",
+    "id_ed25519",
+    ".netrc",
+    ".pgpass",
+    ".htpasswd",
+}
+_SECRET_SUBSTRINGS = ("cookie", "secret", "_token", "id_rsa", "id_ed25519")
+
+
+def _allowed_roots() -> list[Path]:
+    """Directories FileReaderTool is permitted to read from.
+
+    The agent picks the path to read, so reads are confined to roots that
+    hold legitimate PM context: the working directory, the output
+    directory, the input directory, the Obsidian vault (when configured),
+    and any directories named in PM_AGENT_CONTEXT_DIRS (os.pathsep list).
+    Everything else, including home-directory secret files, is refused.
+    """
+    roots: list[Path] = []
+
+    def _add(p: str | None) -> None:
+        if not p:
+            return
+        try:
+            roots.append(Path(p).expanduser().resolve())
+        except Exception:  # noqa: BLE001 — a bad path just does not widen the allowlist
+            return
+
+    _add(os.getcwd())
+    _add(os.getenv("OUTPUT_DIR", "./output"))
+    _add("./input")
+    _add(os.getenv("OBSIDIAN_VAULT_PATH"))
+    for extra in os.getenv("PM_AGENT_CONTEXT_DIRS", "").split(os.pathsep):
+        _add(extra.strip())
+
+    # De-duplicate while preserving order.
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for r in roots:
+        if r not in seen:
+            seen.add(r)
+            unique.append(r)
+    return unique
+
+
+def _is_within(target: Path, root: Path) -> bool:
+    return target == root or root in target.parents
+
+
+def _looks_like_secret(path: Path) -> bool:
+    name = path.name.lower()
+    if name in _SECRET_NAMES:
+        return True
+    return any(s in name for s in _SECRET_SUBSTRINGS)
+
 
 class FileReaderInput(BaseModel):
     """Input schema for FileReaderTool."""
 
     file_path: str = Field(
-        ..., description="Absolute or relative path to the file to read."
+        ..., description="Path to the file to read. Must sit under the project "
+        "working directory, the output or input directory, the configured "
+        "Obsidian vault, or a PM_AGENT_CONTEXT_DIRS entry."
     )
 
 
@@ -22,12 +84,31 @@ class FileReaderTool(BaseTool):
     description: str = (
         "Read local files provided by the PM as internal context. Supports "
         "markdown (.md), plain text (.txt), Word documents (.docx), and "
-        "PDF files (.pdf). Returns the text content of the file."
+        "PDF files (.pdf). Returns the text content of the file. Reads are "
+        "confined to the project working directory, the output and input "
+        "directories, the configured Obsidian vault, and PM_AGENT_CONTEXT_DIRS."
     )
     args_schema: Type[BaseModel] = FileReaderInput
 
     def _run(self, file_path: str) -> str:
-        path = Path(file_path).expanduser().resolve()
+        try:
+            path = Path(file_path).expanduser().resolve()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not resolve path %r: %s", file_path, e)
+            return f"Error: could not resolve path {file_path!r}."
+
+        roots = _allowed_roots()
+        if not any(_is_within(path, root) for root in roots):
+            logger.warning("Refused read outside allowed roots: %s", path)
+            return (
+                f"Error: reading {path} is not permitted. FileReaderTool only "
+                f"reads files under the project working directory, the output "
+                f"or input directory, the Obsidian vault, or a directory listed "
+                f"in PM_AGENT_CONTEXT_DIRS."
+            )
+        if _looks_like_secret(path):
+            logger.warning("Refused read of credential-like file: %s", path)
+            return f"Error: reading {path.name} is not permitted (looks like a credential file)."
 
         if not path.exists():
             logger.warning("File not found: %s", path)

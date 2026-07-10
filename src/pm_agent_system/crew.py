@@ -51,16 +51,19 @@ from crewai.llms.providers.anthropic.completion import AnthropicCompletion
 # Bedrock-specific env vars:
 #   AWS_BEARER_TOKEN_BEDROCK  the Bedrock API key (bearer token)
 #   AWS_BEDROCK_REGION        region where Bedrock is enabled (e.g. us-east-2)
-#   BEDROCK_MODEL_ID          inference profile ID (e.g. us.anthropic.claude-sonnet-4-6)
+#   BEDROCK_MODEL_ID          inference profile ID (e.g. us.anthropic.claude-opus-4-8)
 #
-# Claude Sonnet 4.6 on Bedrock requires the US cross-region inference
-# profile, prefixed with "us." or "global.". If the user sets a plain
-# model ID without the prefix, we auto-prepend "us." so on-demand
-# invocation works.
+# The default model is Opus 4.8. Override it on the direct Anthropic path
+# with ANTHROPIC_MODEL_ID (e.g. set it to "claude-fable-5" for Fable), and
+# on the Bedrock path with BEDROCK_MODEL_ID.
+#
+# Claude on Bedrock requires the US cross-region inference profile,
+# prefixed with "us." or "global.". If the user sets a plain model ID
+# without the prefix, we auto-prepend "us." so on-demand invocation works.
 _LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
 
-_MODEL_ANTHROPIC = "claude-sonnet-4-20250514"
-_MODEL_BEDROCK = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6").strip()
+_MODEL_ANTHROPIC = os.getenv("ANTHROPIC_MODEL_ID", "claude-opus-4-8").strip()
+_MODEL_BEDROCK = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-opus-4-8").strip()
 if _MODEL_BEDROCK and not _MODEL_BEDROCK.startswith(("us.", "global.", "eu.", "apac.")):
     _MODEL_BEDROCK = f"us.{_MODEL_BEDROCK}"
 

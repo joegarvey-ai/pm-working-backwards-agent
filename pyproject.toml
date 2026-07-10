@@ -46,3 +46,9 @@ packages = ["src/pm_agent_system"]
 
 [tool.crewai]
 type = "crew"
+
+[tool.pytest.ini_options]
+# Scope collection to the test suite. Without this, pytest's default
+# recursion picks up scripts/*_test.py helpers that make live LLM and
+# network calls at import time.
+testpaths = ["tests"]

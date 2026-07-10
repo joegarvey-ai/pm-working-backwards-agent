@@ -1,14 +1,15 @@
 """LLM-as-judge evaluations for subjective quality scoring.
 
-Each judge function accepts a RunRecord, calls Claude Sonnet to score
+Each judge function accepts a RunRecord, calls Claude Haiku to score
 the relevant output against a rubric, and returns structured results.
-Judge results can be stored in the RunRecord for trend tracking.
+Judge results can be stored in the RunRecord for trend tracking. Haiku
+keeps judge cost well under production cost, per the harness roadmap.
 
 Provider routing:
-  - Default: AWS Bedrock (uses LLM_PROVIDER=bedrock and the same
-    AWS_BEARER_TOKEN_BEDROCK / region config as the production pipeline).
-  - Fallback: direct Anthropic API (set LLM_PROVIDER=anthropic and
-    provide ANTHROPIC_API_KEY).
+  - Default: direct Anthropic API (LLM_PROVIDER unset or "anthropic",
+    uses ANTHROPIC_API_KEY), matching the production pipeline default.
+  - Alternative: AWS Bedrock (set LLM_PROVIDER=bedrock, uses
+    AWS_BEARER_TOKEN_BEDROCK / region config).
   - Override judge model via HARNESS_JUDGE_MODEL env var.
 """
 
@@ -21,12 +22,12 @@ from typing import Any
 
 from tests.harness.models import RunRecord
 
-_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "bedrock").strip().lower()
+_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
 
-_JUDGE_MODEL_ANTHROPIC = os.getenv("HARNESS_JUDGE_MODEL", "claude-sonnet-4-20250514")
+_JUDGE_MODEL_ANTHROPIC = os.getenv("HARNESS_JUDGE_MODEL", "claude-haiku-4-5")
 _JUDGE_MODEL_BEDROCK = os.getenv(
     "HARNESS_JUDGE_MODEL",
-    os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6"),
+    os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
 )
 if _JUDGE_MODEL_BEDROCK and not _JUDGE_MODEL_BEDROCK.startswith(
     ("us.", "global.", "eu.", "apac.")
