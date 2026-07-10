@@ -48,16 +48,16 @@ _DEFAULT_TIER_MAP: list[tuple[str, ModelTier]] = [
 
 # Bedrock model IDs per tier.
 _BEDROCK_MODELS: dict[ModelTier, str] = {
-    ModelTier.opus: os.getenv("BEDROCK_MODEL_OPUS", "us.anthropic.claude-opus-4-6-v1"),
-    ModelTier.sonnet: os.getenv("BEDROCK_MODEL_SONNET", "us.anthropic.claude-sonnet-4-6"),
+    ModelTier.opus: os.getenv("BEDROCK_MODEL_OPUS", "us.anthropic.claude-opus-4-8"),
+    ModelTier.sonnet: os.getenv("BEDROCK_MODEL_SONNET", "us.anthropic.claude-sonnet-5"),
     ModelTier.haiku: os.getenv("BEDROCK_MODEL_HAIKU", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
 }
 
 # Direct Anthropic API model IDs per tier.
 _ANTHROPIC_MODELS: dict[ModelTier, str] = {
-    ModelTier.opus: os.getenv("ANTHROPIC_MODEL_OPUS", "claude-opus-4-0-20250514"),
-    ModelTier.sonnet: os.getenv("ANTHROPIC_MODEL_SONNET", "claude-sonnet-4-20250514"),
-    ModelTier.haiku: os.getenv("ANTHROPIC_MODEL_HAIKU", "claude-haiku-4-5-20251001"),
+    ModelTier.opus: os.getenv("ANTHROPIC_MODEL_OPUS", "claude-opus-4-8"),
+    ModelTier.sonnet: os.getenv("ANTHROPIC_MODEL_SONNET", "claude-sonnet-5"),
+    ModelTier.haiku: os.getenv("ANTHROPIC_MODEL_HAIKU", "claude-haiku-4-5"),
 }
 
 
