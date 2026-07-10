@@ -253,8 +253,9 @@ def test_external_research_agent_tools_unchanged_when_builder_unset(monkeypatch)
     FileReaderTool, PriorArtSearchTool, ObsidianSearchTool, ObsidianReadTool
     (6 tools total).
     """
-    monkeypatch.delenv("BUILDER_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("MIDWAY_COOKIE_PATH", raising=False)
+    # builder_mcp is gated on the binary being on PATH (it handles Midway
+    # auth itself), not on token env vars, so disable the gate directly.
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
 
     system = PmAgentSystem()
     agent = system.external_research_agent()
@@ -282,8 +283,8 @@ def test_prfaq_agent_tools_original_four_when_outlook_unset(monkeypatch):
     The baseline tool set is: FileReaderTool, StyleGuideLoaderTool,
     ObsidianSearchTool, ObsidianReadTool (4 tools total).
     """
-    monkeypatch.delenv("OUTLOOK_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("MIDWAY_COOKIE_PATH", raising=False)
+    # outlook_mcp is gated on the binary being on PATH, not token env vars.
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
 
     system = PmAgentSystem()
     agent = system.prfaq_agent()
@@ -306,9 +307,9 @@ def test_startup_log_names_three_integrations(monkeypatch, caplog):
     """Requirement 6.4: the startup log line names the three integrations
     with their enabled/disabled status.
     """
-    monkeypatch.delenv("BUILDER_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("OUTLOOK_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("MIDWAY_COOKIE_PATH", raising=False)
+    # builder/outlook gate on binary presence; dovetail on its token.
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
     monkeypatch.delenv("DOVETAIL_API_TOKEN", raising=False)
 
     with caplog.at_level(logging.INFO, logger="pm_agent_system.crew"):
