@@ -183,7 +183,7 @@ def run_crew_with_retry(
             for t in getattr(crew, "tasks", []):
                 t.human_input = False
             return crew.kickoff(inputs=inputs)
-        except (ValueError, RuntimeError, Exception) as exc:
+        except Exception as exc:
             error_str = str(exc)
             if not any(pattern in error_str for pattern in _RETRYABLE_ERRORS):
                 raise

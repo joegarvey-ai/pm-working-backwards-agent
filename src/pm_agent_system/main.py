@@ -487,8 +487,23 @@ def read_current_version(filepath: Path) -> str:
 
 
 def bump_version(version: str) -> str:
-    major, minor = version.split(".")
-    return f"{major}.{int(minor) + 1}"
+    """Increment the minor component of an ``X.Y`` version string.
+
+    Tolerates versions that are not exactly ``major.minor``: a single
+    component (``"2"``) is treated as ``2.0`` and bumped to ``2.1``; extra
+    or non-numeric components (``"1.0.0"``, ``"1.0-beta"``) fall back to
+    bumping the first numeric-looking minor, or to ``<version>.1`` when no
+    numeric minor is present. Never raises on a malformed frontmatter or
+    LLM-emitted version.
+    """
+    parts = str(version).split(".")
+    major = parts[0] if parts and parts[0] else "1"
+    minor_raw = parts[1] if len(parts) > 1 else "0"
+    try:
+        minor = int("".join(c for c in minor_raw if c.isdigit()) or "0")
+    except ValueError:
+        minor = 0
+    return f"{major}.{minor + 1}"
 
 
 # ---------- Subcommand: research ----------
@@ -617,10 +632,22 @@ def cmd_generate(args: argparse.Namespace) -> None:
     )
 
     skip = getattr(args, "skip_validation", False)
+    research_path_arg = getattr(args, "research_path", None)
+    if research_path_arg:
+        rp = Path(research_path_arg).expanduser().resolve()
+        if not rp.exists():
+            print(f"Error: Research file not found: {rp}")
+            sys.exit(1)
+        crew_inputs["research_path"] = str(rp)
+        print(f"Reusing existing research brief: {rp.name} (skipping Agent 1)")
+
     try:
         try:
             t0 = time.monotonic()
-            result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
+            if research_path_arg:
+                result = PmAgentSystem().generate_from_research_crew().kickoff(inputs=crew_inputs)
+            else:
+                result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
             elapsed = time.monotonic() - t0
         except Exception as e:
             print(f"\nError running crew: {e}")
@@ -778,6 +805,8 @@ def cmd_revise(args: argparse.Namespace) -> None:
 
     if vault_cfg:
         generate_index_note(product_slug, vault_cfg)
+
+    _maybe_open_html(working_copy, args)
 
 
 # ---------- Subcommand: full-pipeline (Agents 1 → 2 → 3) ----------
@@ -1270,7 +1299,9 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                 t0_pipeline = time.monotonic()
                 task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
                 crew = PmAgentSystem().full_pipeline_crew(
-                    skip_validation=skip, skip_design=skip_design
+                    skip_validation=skip,
+                    skip_design=skip_design,
+                    sequential_brd=_resolve_sequential_brd(args),
                 )
                 crew.task_callback = _task_callback
                 result = crew.kickoff(inputs=crew_inputs)
@@ -1385,6 +1416,45 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 # ---------- Subcommand: brd (Agent 4, BRD + build spec from approved PRFAQ) ----------
 
 
+def _run_prfaq_verification_gate(prfaq_path: Path, inputs: dict) -> None:
+    """Advisory inter-stage gate between PRFAQ and BRD (opt-in via --verify).
+
+    Runs the verification check on the approved PRFAQ before the BRD stage
+    consumes it, per the CLAUDE.md workflow. Never hard-blocks: it prints a
+    conversational summary, and on an error-severity issue asks the PM
+    whether to proceed. Any verifier failure (e.g. missing provider creds)
+    degrades to a warning so it can never stop a real run.
+    """
+    try:
+        from pm_agent_system.verification import verify_stage
+
+        prfaq_text = prfaq_path.read_text(encoding="utf-8")
+        brief_text = yaml.dump(inputs, default_flow_style=False, sort_keys=False)
+        result = verify_stage(
+            stage_output=prfaq_text, input_brief=brief_text, stage_name="prfaq"
+        )
+    except Exception as exc:  # noqa: BLE001 — advisory only, never block a run
+        print(f"\n(Verification gate skipped: {exc})")
+        return
+
+    errors = [i for i in result.issues if i.severity == "error"]
+    warnings = [i for i in result.issues if i.severity != "error"]
+    print(f"\nVerification gate (PRFAQ → BRD): {result.summary or 'no summary'}")
+    if not result.issues:
+        print("  No style, consistency, sourcing, or grounding issues found.")
+        return
+    for issue in errors + warnings:
+        print(f"  [{issue.severity}] {issue.category}: {issue.description}")
+    if errors:
+        try:
+            resp = input("\n1 or more errors above. Proceed to BRD anyway? [y/N]: ").strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            print("Stopping. Revise the PRFAQ, then re-run.")
+            sys.exit(0)
+
+
 def cmd_brd(args: argparse.Namespace) -> None:
     inputs = validate_input(parse_input(args.input_file))
     prfaq_path = Path(args.prfaq_path).expanduser().resolve()
@@ -1399,6 +1469,9 @@ def cmd_brd(args: argparse.Namespace) -> None:
             prfaq_path = Path(resolve_artifact_path("prfaq", product_slug, vault_cfg, str(prfaq_path)))
         except FileNotFoundError:
             pass
+
+    if getattr(args, "verify", False):
+        _run_prfaq_verification_gate(prfaq_path, inputs)
 
     research_path_arg = ""
     if args.research_path:
@@ -1525,7 +1598,9 @@ def cmd_brd(args: argparse.Namespace) -> None:
     try:
         try:
             t0 = time.monotonic()
-            crew = PmAgentSystem().split_brd_crew()
+            crew = PmAgentSystem().split_brd_crew(
+                sequential_brd=_resolve_sequential_brd(args)
+            )
             crew.task_callback = _task_callback
             result = crew.kickoff(inputs=crew_inputs)
             elapsed = time.monotonic() - t0
@@ -1728,6 +1803,8 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
     if vault_cfg:
         generate_index_note(product_slug, vault_cfg)
 
+    _maybe_open_html(ref_path, args)
+
 
 # ---------- Subcommand: revise-brd (Agent 4 Mode 2) ----------
 
@@ -1840,6 +1917,8 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
     if vault_cfg_for_provider:
         generate_index_note(product_slug, vault_cfg_for_provider)
 
+    _maybe_open_html(working_copy, args)
+
 
 # ---------- Subcommand: wireframes (Agent 3 standalone) ----------
 
@@ -1936,6 +2015,8 @@ def cmd_wireframes(args: argparse.Namespace) -> None:
     if vault_cfg and product_slug:
         copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
+
+    _maybe_open_html(working_copy, args)
 
 
 # ---------- Subcommand: revise-wireframes (Agent 3 Mode 2) ----------
@@ -2052,6 +2133,8 @@ def cmd_revise_wireframes(args: argparse.Namespace) -> None:
 
     if vault_cfg_for_provider:
         generate_index_note(product_slug, vault_cfg_for_provider)
+
+    _maybe_open_html(working_copy, args)
 
 
 # ---------- Subcommand: diff ----------
@@ -2396,6 +2479,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_generate.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
     p_generate.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
+    p_generate.add_argument("--research-path", help="Path to an existing research brief markdown. When set, reuse it and skip Agent 1.")
     p_generate.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_generate.set_defaults(func=cmd_generate)
 
@@ -2407,6 +2491,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_revise.add_argument(
         "--context-text", help="Inline revision instructions"
     )
+    p_revise.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_revise.set_defaults(func=cmd_revise)
 
     # ----- Agent 4 commands -----
@@ -2442,6 +2527,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip Agent 3 (design brief) and run the three-agent pipeline as before",
     )
     p_full.add_argument("--open", action="store_true", help="Open the final HTML artifact in the default browser when done")
+    p_full.add_argument(
+        "--sequential-brd",
+        action="store_true",
+        help="Run the BRD structure/cost/compliance steps sequentially instead of in parallel. Slower but avoids the Bedrock toolResult race. Auto-enabled when LLM_PROVIDER=bedrock.",
+    )
     p_full.set_defaults(func=cmd_full_pipeline)
 
     p_brd = sub.add_parser(
@@ -2461,6 +2551,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_brd.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
     p_brd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
+    p_brd.add_argument(
+        "--sequential-brd",
+        action="store_true",
+        help="Run the BRD structure/cost/compliance steps sequentially instead of in parallel. Slower but avoids the Bedrock toolResult race. Auto-enabled when LLM_PROVIDER=bedrock.",
+    )
+    p_brd.add_argument(
+        "--verify",
+        action="store_true",
+        help="Run the advisory verification gate on the PRFAQ before generating the BRD (style, consistency, sourcing, grounding). Warns; does not hard-block.",
+    )
     p_brd.set_defaults(func=cmd_brd)
 
     p_spec = sub.add_parser(
@@ -2469,6 +2569,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_spec.add_argument("--brd-path", required=True, help="Path to approved BRD markdown")
     p_spec.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
+    p_spec.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_spec.set_defaults(func=cmd_build_spec)
 
     p_rbrd = sub.add_parser(
@@ -2478,6 +2579,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rbrd.add_argument("--brd-path", required=True, help="Path to current BRD markdown")
     p_rbrd.add_argument("--context-path", help="File or folder with revision context")
     p_rbrd.add_argument("--context-text", help="Inline revision instructions")
+    p_rbrd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_rbrd.set_defaults(func=cmd_revise_brd)
 
     # ----- Agent 3 commands -----
@@ -2489,6 +2591,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_wire.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
     p_wire.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
     p_wire.add_argument("--research-path", help="Optional path to research brief markdown")
+    p_wire.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_wire.set_defaults(func=cmd_wireframes)
 
     p_rwire = sub.add_parser(
@@ -2498,6 +2601,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rwire.add_argument("--design-brief-path", required=True, help="Path to current design brief markdown")
     p_rwire.add_argument("--context-path", help="File or folder with revision context")
     p_rwire.add_argument("--context-text", help="Inline revision instructions")
+    p_rwire.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_rwire.set_defaults(func=cmd_revise_wireframes)
 
     p_clean = sub.add_parser("clean", help="Manage output retention (archive/list/delete)")
@@ -2585,12 +2689,101 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Commands that produce fresh output and may run the retention sweep first.
+# Read commands (brd, build-spec, revise*, wireframes*) resolve a
+# user-supplied path out of output/, so sweeping first can archive the very
+# file they are about to read; they are excluded. clean/diff/view/feedback
+# do not write pipeline artifacts.
+_RETENTION_SWEEP_COMMANDS = frozenset({"research", "generate", "full-pipeline"})
+
+# Commands that call an LLM and therefore need a model provider key.
+_LLM_COMMANDS = frozenset({
+    "research", "generate", "revise", "full-pipeline", "brd", "build-spec",
+    "revise-brd", "wireframes", "revise-wireframes", "feedback",
+})
+# Commands that reach the web via Tavily and therefore need a Tavily key.
+_TAVILY_COMMANDS = frozenset({"research", "generate", "full-pipeline", "brd"})
+
+_PLACEHOLDER_MARKERS = ("your_", "_here", "changeme", "xxxx")
+
+
+def _maybe_open_html(path, args: argparse.Namespace) -> None:
+    """Open the HTML sibling of ``path`` in a browser when --open was passed.
+
+    No-op when the command has no --open flag, the flag is unset, or the
+    HTML file does not exist. ``path`` may be a str or Path.
+    """
+    if not getattr(args, "open", False) or not path:
+        return
+    html_path = Path(path).with_suffix(".html")
+    if html_path.exists():
+        webbrowser.open(html_path.resolve().as_uri())
+
+
+def _resolve_sequential_brd(args: argparse.Namespace) -> bool:
+    """True when the split BRD siblings should run sequentially.
+
+    Honors an explicit --sequential-brd flag, and auto-enables it on
+    Bedrock, where parallel siblings can hit the toolResult interleaving
+    race. On the Anthropic provider the parallel path is the default for
+    speed.
+    """
+    if getattr(args, "sequential_brd", False):
+        return True
+    return os.getenv("LLM_PROVIDER", "anthropic").strip().lower() == "bedrock"
+
+
+def _is_placeholder(value: str) -> bool:
+    v = value.strip().lower()
+    return not v or any(marker in v for marker in _PLACEHOLDER_MARKERS)
+
+
+def _preflight_check(command: str | None) -> None:
+    """Fail fast with an actionable message when a required key is missing.
+
+    Runs before any crew kickoff so the common first-run failure (missing,
+    mistyped, or placeholder API key) surfaces as the message SETUP.md
+    promises instead of an opaque exception mid-run. Only gates commands
+    that actually call the relevant service.
+    """
+    if command not in _LLM_COMMANDS:
+        return
+
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    if provider == "bedrock":
+        if _is_placeholder(os.getenv("AWS_BEARER_TOKEN_BEDROCK", "")):
+            print("AWS_BEARER_TOKEN_BEDROCK not set")
+            print(
+                "LLM_PROVIDER=bedrock requires a Bedrock API key. Set "
+                "AWS_BEARER_TOKEN_BEDROCK in your .env (see .env.example)."
+            )
+            sys.exit(1)
+    else:
+        if _is_placeholder(os.getenv("ANTHROPIC_API_KEY", "")):
+            print("ANTHROPIC_API_KEY not set")
+            print(
+                "Add your Anthropic API key to .env. The line should read "
+                "ANTHROPIC_API_KEY=sk-ant-... with no spaces around the =. "
+                "See SETUP.md Step 6."
+            )
+            sys.exit(1)
+
+    if command in _TAVILY_COMMANDS and _is_placeholder(os.getenv("TAVILY_API_KEY", "")):
+        print("TAVILY_API_KEY not set")
+        print(
+            "The research agent needs a Tavily API key for web search. Add "
+            "TAVILY_API_KEY=tvly-... to .env. See SETUP.md Step 6."
+        )
+        sys.exit(1)
+
+
 def run():
     """CLI entry point."""
     load_dotenv()
     parser = _build_parser()
     args = parser.parse_args()
-    if args.command not in ("clean", "diff"):
+    _preflight_check(args.command)
+    if args.command in _RETENTION_SWEEP_COMMANDS:
         enforce_retention_policy(_output_dir(), archive_after_days=_retention_days())
     args.func(args)
 

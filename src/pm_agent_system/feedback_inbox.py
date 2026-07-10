@@ -120,7 +120,16 @@ def load_all_feedback() -> list[FeedbackItem]:
         item = parse_feedback_file(md_path)
         if item is not None:
             items.append(item)
-    items.sort(key=lambda it: it.received)
+    # Normalize to tz-aware UTC before sorting: PyYAML parses "...Z" as
+    # tz-aware and a space-form timestamp as naive, and Python refuses to
+    # compare the two. Assume UTC when a timestamp carries no offset.
+    def _received_key(it: FeedbackItem):
+        received = it.received
+        if received.tzinfo is None:
+            return received.replace(tzinfo=timezone.utc)
+        return received.astimezone(timezone.utc)
+
+    items.sort(key=_received_key)
     return items
 
 
