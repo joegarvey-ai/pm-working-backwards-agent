@@ -49,6 +49,26 @@ class JudgeResult:
     overall_score: float = 0.0
     summary: str = ""
     raw_response: str = ""
+    # Populated when the judge call or the response parse failed. When set,
+    # overall_score is meaningless (do NOT treat 0.0 as a real low score).
+    error: str | None = None
+
+    def to_record(self):
+        """Convert to a serializable JudgeResultRecord for the RunRecord."""
+        from tests.harness.models import CriterionScoreRecord, JudgeResultRecord
+
+        return JudgeResultRecord(
+            judge_name=self.judge_name,
+            scores=[
+                CriterionScoreRecord(
+                    criterion=s.criterion, score=s.score, rationale=s.rationale
+                )
+                for s in self.scores
+            ],
+            overall_score=self.overall_score,
+            summary=self.summary,
+            error=self.error,
+        )
 
 
 def _call_judge(system_prompt: str, user_prompt: str) -> str:
@@ -99,15 +119,20 @@ def _call_judge_anthropic(system_prompt: str, user_prompt: str) -> str:
     return response.content[0].text
 
 
-def _parse_judge_response(raw: str) -> list[CriterionScore]:
-    """Parse a JSON array of criterion scores from the judge response."""
+def _parse_judge_response(raw: str) -> tuple[list[CriterionScore], bool]:
+    """Parse a JSON array of criterion scores from the judge response.
+
+    Returns ``(scores, parse_ok)``. ``parse_ok`` is False when no JSON
+    array could be found or it failed to parse, which lets callers
+    distinguish a parse failure from a genuine empty/low score.
+    """
     start = raw.find("[")
     end = raw.rfind("]") + 1
     if start == -1 or end == 0:
-        return []
+        return [], False
     try:
         items = json.loads(raw[start:end])
-        return [
+        scores = [
             CriterionScore(
                 criterion=item["criterion"],
                 score=int(item["score"]),
@@ -115,8 +140,44 @@ def _parse_judge_response(raw: str) -> list[CriterionScore]:
             )
             for item in items
         ]
+        return scores, True
     except (json.JSONDecodeError, KeyError, ValueError):
-        return []
+        return [], False
+
+
+def _score(judge_name: str, system_prompt: str, user_prompt: str) -> JudgeResult:
+    """Call the judge, parse the response, and build a JudgeResult.
+
+    Sets ``error`` (leaving overall_score at 0.0 as a non-signal) when the
+    call raises or the response cannot be parsed, so a broken judge is
+    never mistaken for a real low score.
+    """
+    try:
+        raw = _call_judge(system_prompt, user_prompt)
+    except Exception as exc:  # noqa: BLE001 — surface call failure, don't crash the run
+        return JudgeResult(
+            judge_name=judge_name,
+            summary=f"Judge call failed: {exc}",
+            error=f"call_failed: {exc}",
+        )
+
+    scores, parse_ok = _parse_judge_response(raw)
+    if not parse_ok:
+        return JudgeResult(
+            judge_name=judge_name,
+            summary="Judge response could not be parsed as scores.",
+            raw_response=raw,
+            error="parse_failed",
+        )
+
+    overall = sum(s.score for s in scores) / len(scores) if scores else 0.0
+    return JudgeResult(
+        judge_name=judge_name,
+        scores=scores,
+        overall_score=overall,
+        summary=f"{judge_name}: {overall:.1f}/5 across {len(scores)} criteria",
+        raw_response=raw,
+    )
 
 
 def _find_output(record: RunRecord, task_substring: str) -> str | None:
@@ -179,17 +240,7 @@ Here is the PRFAQ to evaluate:
 {prfaq_text[:30000]}
 </prfaq>"""
 
-    raw = _call_judge(_PRFAQ_FIDELITY_SYSTEM, user_prompt)
-    scores = _parse_judge_response(raw)
-    overall = sum(s.score for s in scores) / len(scores) if scores else 0.0
-
-    return JudgeResult(
-        judge_name="prfaq_fidelity",
-        scores=scores,
-        overall_score=overall,
-        summary=f"PRFAQ fidelity: {overall:.1f}/5 across {len(scores)} criteria",
-        raw_response=raw,
-    )
+    return _score("prfaq_fidelity", _PRFAQ_FIDELITY_SYSTEM, user_prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -239,17 +290,7 @@ def judge_citation_accuracy(record: RunRecord) -> JudgeResult:
 {combined}
 </outputs>"""
 
-    raw = _call_judge(_CITATION_SYSTEM, user_prompt)
-    scores = _parse_judge_response(raw)
-    overall = sum(s.score for s in scores) / len(scores) if scores else 0.0
-
-    return JudgeResult(
-        judge_name="citation_accuracy",
-        scores=scores,
-        overall_score=overall,
-        summary=f"Citation accuracy: {overall:.1f}/5 across {len(scores)} criteria",
-        raw_response=raw,
-    )
+    return _score("citation_accuracy", _CITATION_SYSTEM, user_prompt)
 
 
 # ---------------------------------------------------------------------------
@@ -300,14 +341,4 @@ def judge_aws_alignment(record: RunRecord) -> JudgeResult:
 {brd_text[:30000]}
 </brd>"""
 
-    raw = _call_judge(_AWS_ALIGNMENT_SYSTEM, user_prompt)
-    scores = _parse_judge_response(raw)
-    overall = sum(s.score for s in scores) / len(scores) if scores else 0.0
-
-    return JudgeResult(
-        judge_name="aws_alignment",
-        scores=scores,
-        overall_score=overall,
-        summary=f"AWS alignment: {overall:.1f}/5 across {len(scores)} criteria",
-        raw_response=raw,
-    )
+    return _score("aws_alignment", _AWS_ALIGNMENT_SYSTEM, user_prompt)
