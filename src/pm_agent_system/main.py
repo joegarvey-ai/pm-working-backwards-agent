@@ -632,10 +632,22 @@ def cmd_generate(args: argparse.Namespace) -> None:
     )
 
     skip = getattr(args, "skip_validation", False)
+    research_path_arg = getattr(args, "research_path", None)
+    if research_path_arg:
+        rp = Path(research_path_arg).expanduser().resolve()
+        if not rp.exists():
+            print(f"Error: Research file not found: {rp}")
+            sys.exit(1)
+        crew_inputs["research_path"] = str(rp)
+        print(f"Reusing existing research brief: {rp.name} (skipping Agent 1)")
+
     try:
         try:
             t0 = time.monotonic()
-            result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
+            if research_path_arg:
+                result = PmAgentSystem().generate_from_research_crew().kickoff(inputs=crew_inputs)
+            else:
+                result = PmAgentSystem().research_and_generate_crew(skip_validation=skip).kickoff(inputs=crew_inputs)
             elapsed = time.monotonic() - t0
         except Exception as e:
             print(f"\nError running crew: {e}")
@@ -2467,6 +2479,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_generate.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
     p_generate.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
+    p_generate.add_argument("--research-path", help="Path to an existing research brief markdown. When set, reuse it and skip Agent 1.")
     p_generate.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_generate.set_defaults(func=cmd_generate)
 
