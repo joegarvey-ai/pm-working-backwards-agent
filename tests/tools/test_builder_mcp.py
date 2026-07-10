@@ -23,10 +23,13 @@ from pm_agent_system.tools.builder_mcp import BuilderMCPTool
 
 _ACTION_TO_REMOTE = {
     "wiki_search": "InternalSearch",
+    "internal_search": "InternalSearch",
     "code_search": "InternalCodeSearch",
     "taskei_search": "TaskeiListTasks",
     "quip_search": "ReadInternalWebsites",
     "pipeline_search": "GetPipelineDetails",
+    "acronym_lookup": "SearchAcronymCentral",
+    "golden_path_search": "SearchSoftwareRecommendations",
 }
 
 
@@ -70,7 +73,10 @@ class TestActionMapping:
 
         assert captured["binary"] == "builder-mcp"
         assert captured["tool_name"] == expected_remote
-        assert "test query" in str(captured["arguments"])
+        # The query reaches the args verbatim or URL-encoded (quip_search
+        # percent/plus-encodes spaces for the search URL).
+        arg_str = str(captured["arguments"])
+        assert "test query" in arg_str or "test+query" in arg_str
         assert result == "mocked result"
 
 
