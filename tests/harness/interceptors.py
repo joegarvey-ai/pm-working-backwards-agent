@@ -47,9 +47,11 @@ class ToolInterceptor:
         self,
         trace_builder: Any | None = None,
         replay_calls: list[ToolCallRecord] | None = None,
+        root_span_id: str | None = None,
     ) -> None:
         self.records: list[ToolCallRecord] = []
         self._trace_builder = trace_builder
+        self._root_span_id = root_span_id
         self._replay_calls = replay_calls
         self._replay_index = 0
         self._per_tool_replay: dict[str, list[ToolCallRecord]] = {}
@@ -109,7 +111,8 @@ class ToolInterceptor:
             error_message = str(exc)
             raise
         finally:
-            duration = time.perf_counter() - start
+            end = time.perf_counter()
+            duration = end - start
             record = ToolCallRecord(
                 tool_name=tool_name,
                 input_args=input_args,
@@ -120,6 +123,19 @@ class ToolInterceptor:
                 timestamp=start,
             )
             self.records.append(record)
+            if self._trace_builder is not None:
+                try:
+                    from .models import SpanType
+
+                    self._trace_builder.add_completed_span(
+                        SpanType.tool_call,
+                        start_time=start,
+                        end_time=end,
+                        parent_span_id=self._root_span_id,
+                        metadata={"tool_name": tool_name},
+                    )
+                except Exception:  # noqa: BLE001 — tracing must never break a run
+                    pass
 
     def _replay_tool_call(
         self,
@@ -177,10 +193,12 @@ class LLMInterceptor:
         original_llm_factory: Callable[..., Any],
         trace_builder: Any | None = None,
         replay_calls: list[LLMCallRecord] | None = None,
+        root_span_id: str | None = None,
     ) -> None:
         self.records: list[LLMCallRecord] = []
         self._original_llm_factory = original_llm_factory
         self._trace_builder = trace_builder
+        self._root_span_id = root_span_id
         self._replay_calls = replay_calls
         self._replay_index = 0
         self._per_agent_replay: dict[str, list[LLMCallRecord]] = {}
@@ -300,7 +318,8 @@ class LLMInterceptor:
             error_message = str(exc)
             raise
         finally:
-            duration = time.perf_counter() - start
+            end = time.perf_counter()
+            duration = end - start
             cost = estimate_cost(model_id, input_tokens, output_tokens)
 
             # Derive agent/task names from CrewAI objects when available.
@@ -322,6 +341,23 @@ class LLMInterceptor:
                 timestamp=start,
             )
             self.records.append(record)
+            if self._trace_builder is not None:
+                try:
+                    from .models import SpanType
+
+                    self._trace_builder.add_completed_span(
+                        SpanType.llm_call,
+                        start_time=start,
+                        end_time=end,
+                        parent_span_id=self._root_span_id,
+                        metadata={
+                            "model_id": model_id,
+                            "agent_name": agent_name,
+                            "task_name": task_name,
+                        },
+                    )
+                except Exception:  # noqa: BLE001 — tracing must never break a run
+                    pass
 
     # -- replay mode --------------------------------------------------------
 

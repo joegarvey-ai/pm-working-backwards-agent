@@ -253,8 +253,9 @@ def test_external_research_agent_tools_unchanged_when_builder_unset(monkeypatch)
     FileReaderTool, PriorArtSearchTool, ObsidianSearchTool, ObsidianReadTool
     (6 tools total).
     """
-    monkeypatch.delenv("BUILDER_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("MIDWAY_COOKIE_PATH", raising=False)
+    # builder_mcp is gated on the binary being on PATH (it handles Midway
+    # auth itself), not on token env vars, so disable the gate directly.
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
 
     system = PmAgentSystem()
     agent = system.external_research_agent()
@@ -282,8 +283,10 @@ def test_prfaq_agent_tools_original_four_when_outlook_unset(monkeypatch):
     The baseline tool set is: FileReaderTool, StyleGuideLoaderTool,
     ObsidianSearchTool, ObsidianReadTool (4 tools total).
     """
-    monkeypatch.delenv("OUTLOOK_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("MIDWAY_COOKIE_PATH", raising=False)
+    # The prfaq agent's optional tools (outlook_mcp, working_backwards_ai)
+    # gate on their binaries being on PATH, not token env vars.
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._wb_ai_enabled", lambda: False)
 
     system = PmAgentSystem()
     agent = system.prfaq_agent()
@@ -296,19 +299,21 @@ def test_prfaq_agent_tools_original_four_when_outlook_unset(monkeypatch):
         "ObsidianReadTool",
     ]
     assert tool_names == expected_baseline, (
-        f"Expected exactly {expected_baseline} when outlook MCP is disabled, "
-        f"got {tool_names}"
+        f"Expected exactly {expected_baseline} when optional MCP tools are "
+        f"disabled, got {tool_names}"
     )
     assert "OutlookMCPTool" not in tool_names
+    assert "WorkingBackwardsAICritiqueTool" not in tool_names
 
 
 def test_startup_log_names_three_integrations(monkeypatch, caplog):
     """Requirement 6.4: the startup log line names the three integrations
     with their enabled/disabled status.
     """
-    monkeypatch.delenv("BUILDER_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("OUTLOOK_MCP_TOKEN", raising=False)
-    monkeypatch.delenv("MIDWAY_COOKIE_PATH", raising=False)
+    # builder/outlook/wb_ai gate on binary presence; dovetail on its token.
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._wb_ai_enabled", lambda: False)
     monkeypatch.delenv("DOVETAIL_API_TOKEN", raising=False)
 
     with caplog.at_level(logging.INFO, logger="pm_agent_system.crew"):
@@ -326,12 +331,14 @@ def test_startup_log_names_three_integrations(monkeypatch, caplog):
     )
 
     log_line = integration_logs[0]
-    # All three integrations should be named
+    # All integrations should be named
     assert "builder_mcp" in log_line
     assert "outlook_mcp" in log_line
+    assert "working_backwards_ai" in log_line
     assert "dovetail" in log_line
 
-    # With all tokens unset, all should be disabled
+    # With all gates disabled, all should be disabled
     assert "builder_mcp=disabled" in log_line
     assert "outlook_mcp=disabled" in log_line
+    assert "working_backwards_ai=disabled" in log_line
     assert "dovetail=disabled" in log_line

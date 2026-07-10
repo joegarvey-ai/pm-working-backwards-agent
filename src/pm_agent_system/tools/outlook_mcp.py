@@ -1,47 +1,53 @@
 """Outlook MCP tool for internal Amazon systems.
 
-Wraps aws-outlook-mcp's JSON-RPC endpoint and exposes four actions:
-  calendar_search    Search calendar events.
-  email_search       Search email metadata (bodies are scrubbed).
-  room_availability  Check room availability for a date range.
-  schedule_summary   Summarize a participant's schedule.
+Wraps the canonical ``aws-outlook-mcp`` server, a stdio MCP binary, and
+exposes four actions mapped to the server's real tool names:
 
-Authentication resolves via the shared ``_mcp_jsonrpc`` helper: midway
-cookie first, ``OUTLOOK_MCP_TOKEN`` fallback. When neither is available,
-``_run`` returns a descriptive error string and never raises.
+  calendar_search    -> calendar_search       (search events by keyword)
+  email_search       -> email_search          (search email; bodies scrubbed)
+  room_availability  -> calendar_room_booking (find open meeting rooms)
+  schedule_summary   -> calendar_availability (free/busy for attendees)
 
-Email privacy (Requirement 3.6): the ``email_search`` action runs its
-result through ``_scrub_email_bodies`` before returning. The scrubber
-drops ``body``, ``body_preview``, and ``body_html`` keys at any depth
-and preserves only metadata and summaries.
+Transport is stdio (same pattern as ``builder_mcp``): the binary is
+launched per call and auth (Midway cookie) is handled by the binary
+itself. When ``aws-outlook-mcp`` is not on PATH, ``_run`` returns a
+descriptive error string and never raises, so the OSS variant of the
+pipeline runs unchanged outside Amazon.
+
+Email privacy: the ``email_search`` action runs its result through
+``_scrub_email_bodies`` before returning. The scrubber drops ``body``,
+``body_preview``, and ``body_html`` keys at any depth and preserves only
+metadata and summaries.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Any, Type
 
-import httpx
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
-from pm_agent_system.tools import _mcp_jsonrpc
+from pm_agent_system.tools import _mcp_stdio
 
 logger = logging.getLogger(__name__)
 
 _CALL_LOG_PATH = Path(os.getenv("OUTPUT_DIR", "./output")) / "outlook_mcp_calls.log"
 
+_BINARY_NAME = "aws-outlook-mcp"
+
 # ---------------------------------------------------------------------------
-# Action to remote MCP tool name mapping
+# Action -> (canonical aws-outlook-mcp tool name) mapping
 # ---------------------------------------------------------------------------
 _ACTION_MAP: dict[str, str] = {
-    "calendar_search": "search_calendar",
-    "email_search": "search_email",
-    "room_availability": "check_room_availability",
-    "schedule_summary": "summarize_schedule",
+    "calendar_search": "calendar_search",
+    "email_search": "email_search",
+    "room_availability": "calendar_room_booking",
+    "schedule_summary": "calendar_availability",
 }
 
 _VALID_ACTIONS = ", ".join(f"'{a}'" for a in _ACTION_MAP)
@@ -55,7 +61,7 @@ class OutlookMCPInput(BaseModel):
 
     query: str = Field(
         ...,
-        description="Free-text query. Required.",
+        description="Free-text query (event/email keywords). Required.",
     )
     action: str = Field(
         default="calendar_search",
@@ -66,20 +72,24 @@ class OutlookMCPInput(BaseModel):
     )
     start_date: str = Field(
         default="",
-        description=(
-            "Optional ISO-8601 start date for date-ranged queries."
-        ),
+        description="Optional start date (YYYY-MM-DD) for date-ranged queries.",
     )
     end_date: str = Field(
         default="",
-        description=(
-            "Optional ISO-8601 end date for date-ranged queries."
-        ),
+        description="Optional end date (YYYY-MM-DD) for date-ranged queries.",
     )
     participants: str = Field(
         default="",
         description=(
-            "Optional comma-separated participant aliases or emails."
+            "Comma-separated attendee emails for schedule_summary "
+            "(free/busy). Required for that action."
+        ),
+    )
+    building: str = Field(
+        default="",
+        description=(
+            "Building code for room_availability (e.g. 'SEA33'). Required "
+            "for that action."
         ),
     )
     limit: int = Field(
@@ -89,7 +99,7 @@ class OutlookMCPInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Email body scrubber (Requirement 3.6)
+# Email body scrubber
 # ---------------------------------------------------------------------------
 _SCRUB_KEYS = frozenset({"body", "body_preview", "body_html"})
 
@@ -153,14 +163,16 @@ class OutlookMCPTool(BaseTool):
     """Search Outlook calendar, email, and room data via aws-outlook-mcp.
 
     Supports four actions: calendar_search, email_search,
-    room_availability, and schedule_summary. Requires OUTLOOK_MCP_TOKEN
-    (or MIDWAY_COOKIE_PATH) and OUTLOOK_MCP_ENDPOINT to be set.
+    room_availability, and schedule_summary. Requires the
+    ``aws-outlook-mcp`` binary on PATH and a valid Midway session
+    (``mwinit -f``). Auth is handled by the binary; no env vars are
+    required from this tool.
     """
 
     name: str = "outlook_mcp"
     description: str = (
-        "Search Outlook calendar, email metadata, and room availability "
-        "via aws-outlook-mcp. "
+        "Search Outlook calendar, email metadata, meeting-room availability, "
+        "and attendee free/busy via aws-outlook-mcp. "
         "Actions: calendar_search, email_search, room_availability, "
         "schedule_summary."
     )
@@ -175,9 +187,10 @@ class OutlookMCPTool(BaseTool):
         start_date: str = "",
         end_date: str = "",
         participants: str = "",
+        building: str = "",
         limit: int = 10,
     ) -> str:
-        _mcp_jsonrpc.log_call(
+        _mcp_stdio.log_call(
             _CALL_LOG_PATH,
             "invocation",
             {
@@ -186,54 +199,36 @@ class OutlookMCPTool(BaseTool):
                 "start_date": start_date,
                 "end_date": end_date,
                 "participants": participants,
+                "building": building,
                 "limit": limit,
             },
         )
 
-        # --- auth ---------------------------------------------------------
-        auth = _mcp_jsonrpc.resolve_auth(
-            "MIDWAY_COOKIE_PATH", "OUTLOOK_MCP_TOKEN", logger
-        )
-        if auth.bearer_token is None and auth.cookie_header is None:
-            msg = (
-                "OUTLOOK_MCP_TOKEN not set in environment variables; "
-                "set token or MIDWAY_COOKIE_PATH to enable outlook_mcp."
-            )
-            _mcp_jsonrpc.log_call(_CALL_LOG_PATH, "auth_error", {"message": msg})
-            return msg
-
-        # --- endpoint -----------------------------------------------------
-        endpoint = os.getenv("OUTLOOK_MCP_ENDPOINT", "").strip()
-        if not endpoint:
-            msg = (
-                "OUTLOOK_MCP_ENDPOINT not set in environment variables; "
-                "set it to the aws-outlook-mcp JSON-RPC endpoint URL."
-            )
-            _mcp_jsonrpc.log_call(_CALL_LOG_PATH, "config_error", {"message": msg})
-            return msg
-
         # --- clamp limit --------------------------------------------------
         limit = max(1, min(int(limit or 10), 100))
 
-        # --- dispatch and call --------------------------------------------
+        # --- dispatch -----------------------------------------------------
         try:
-            remote_tool_name, args = self._dispatch(
-                action, query, start_date, end_date, participants, limit
+            remote_tool_name, arguments = self._dispatch(
+                action, query, start_date, end_date, participants, building, limit
             )
         except ValueError as exc:
-            # Unknown action
             return str(exc)
 
+        # --- call ---------------------------------------------------------
         try:
-            result = _mcp_jsonrpc.call_mcp(
-                endpoint, auth, remote_tool_name, args, timeout=30.0
+            result = _mcp_stdio.call_stdio_mcp(
+                _BINARY_NAME,
+                remote_tool_name,
+                arguments,
+                timeout=30.0,
             )
 
-            # Email privacy: scrub body content before returning
+            # Email privacy: scrub body content before returning.
             if action == "email_search":
                 result = _scrub_email_bodies(result)
 
-            _mcp_jsonrpc.log_call(
+            _mcp_stdio.log_call(
                 _CALL_LOG_PATH,
                 "response",
                 {
@@ -243,19 +238,23 @@ class OutlookMCPTool(BaseTool):
                 },
             )
             return result
-        except httpx.HTTPStatusError as exc:
-            body = exc.response.text[:300] if exc.response else ""
-            status = exc.response.status_code if exc.response else "unknown"
-            msg = f"Outlook MCP error (HTTP {status}): {body}"
-            _mcp_jsonrpc.log_call(
-                _CALL_LOG_PATH,
-                "http_error",
-                {"action": action, "status": status, "body": body},
+        except FileNotFoundError as exc:
+            msg = (
+                f"aws-outlook-mcp binary not found on PATH; install via "
+                f"'toolbox install mcp-registry && mcp-registry install "
+                f"aws-outlook-mcp' and run 'mwinit -f'. ({exc})"
             )
+            _mcp_stdio.log_call(
+                _CALL_LOG_PATH, "binary_missing", {"action": action, "message": str(exc)}
+            )
+            return msg
+        except asyncio.TimeoutError:
+            msg = f"Outlook MCP call timed out (action={action})."
+            _mcp_stdio.log_call(_CALL_LOG_PATH, "timeout", {"action": action})
             return msg
         except Exception as exc:  # noqa: BLE001
             msg = f"Error connecting to outlook_mcp: {exc}"
-            _mcp_jsonrpc.log_call(
+            _mcp_stdio.log_call(
                 _CALL_LOG_PATH,
                 "exception",
                 {"action": action, "type": type(exc).__name__, "message": str(exc)},
@@ -271,18 +270,21 @@ class OutlookMCPTool(BaseTool):
         start_date: str,
         end_date: str,
         participants: str,
+        building: str,
         limit: int,
     ) -> tuple[str, dict]:
-        """Map *action* to the remote MCP tool name and build the args dict.
+        """Map *action* to the aws-outlook-mcp tool name and build its args.
 
-        Returns ``(remote_tool_name, arguments)`` on success.
-        Raises ``ValueError`` for unknown actions.
+        Returns ``(remote_tool_name, arguments)`` on success. Raises
+        ``ValueError`` for unknown actions. Argument shapes match the
+        server's real schemas (calendar_search/email_search take ``query``;
+        calendar_availability takes ``users``/``startDate``/``endDate``;
+        calendar_room_booking takes ``building``/``startTime``/``endTime``).
         """
         remote_tool = _ACTION_MAP.get(action)
         if remote_tool is None:
             raise ValueError(
-                f"Unknown action '{action}'. "
-                f"Valid actions: {_VALID_ACTIONS}."
+                f"Unknown action '{action}'. Valid actions: {_VALID_ACTIONS}."
             )
 
         args: dict = {}
@@ -290,33 +292,30 @@ class OutlookMCPTool(BaseTool):
         if action == "calendar_search":
             args["query"] = query
             args["limit"] = limit
-            if start_date:
-                args["start_date"] = start_date
-            if end_date:
-                args["end_date"] = end_date
-            if participants:
-                args["participants"] = participants
 
         elif action == "email_search":
             args["query"] = query
             args["limit"] = limit
             if start_date:
-                args["start_date"] = start_date
+                args["startDate"] = start_date
             if end_date:
-                args["end_date"] = end_date
-
-        elif action == "room_availability":
-            args["query"] = query
-            if start_date:
-                args["start_date"] = start_date
-            if end_date:
-                args["end_date"] = end_date
+                args["endDate"] = end_date
 
         elif action == "schedule_summary":
-            args["participants"] = participants
+            # calendar_availability: users + startDate + endDate (all required).
+            users = [p.strip() for p in participants.split(",") if p.strip()]
+            args["users"] = users
             if start_date:
-                args["start_date"] = start_date
+                args["startDate"] = start_date
             if end_date:
-                args["end_date"] = end_date
+                args["endDate"] = end_date
+
+        elif action == "room_availability":
+            # calendar_room_booking: building + startTime + endTime (required).
+            args["building"] = building
+            if start_date:
+                args["startTime"] = start_date
+            if end_date:
+                args["endTime"] = end_date
 
         return remote_tool, args

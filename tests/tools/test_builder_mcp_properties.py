@@ -30,10 +30,13 @@ from pm_agent_system.tools.builder_mcp import BuilderMCPInput, BuilderMCPTool
 
 VALID_ACTIONS = [
     "wiki_search",
+    "internal_search",
     "code_search",
     "taskei_search",
     "quip_search",
     "pipeline_search",
+    "acronym_lookup",
+    "golden_path_search",
 ]
 
 query_st = st.text(min_size=1).filter(lambda s: s.strip())

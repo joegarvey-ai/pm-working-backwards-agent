@@ -181,6 +181,30 @@ class LatencySummary(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class CriterionScoreRecord(BaseModel):
+    """One judge criterion score (1-5) with its rationale."""
+
+    criterion: str
+    score: int
+    rationale: str = ""
+
+
+class JudgeResultRecord(BaseModel):
+    """Serializable result of one LLM-as-judge evaluation.
+
+    ``error`` is populated when the judge call or response parse failed;
+    in that case ``overall_score`` is meaningless and must not be read as
+    a real low score. Consumers check ``error is None`` before trusting
+    the scores.
+    """
+
+    judge_name: str
+    scores: list[CriterionScoreRecord] = Field(default_factory=list)
+    overall_score: float = 0.0
+    summary: str = ""
+    error: str | None = None
+
+
 class RunRecord(BaseModel):
     """Top-level container for a single crew execution."""
 
@@ -193,4 +217,5 @@ class RunRecord(BaseModel):
     cost_summary: CostSummary
     latency_summary: LatencySummary
     agent_outputs: dict[str, str] = Field(default_factory=dict)
+    judge_results: list[JudgeResultRecord] = Field(default_factory=list)
     created_at: str  # ISO 8601 UTC

@@ -176,6 +176,16 @@ prfaq_agent:
     timeline, resourcing, or stakeholder availability. If the outlook_mcp
     tool is not available, proceed without scheduling data. Do not
     fabricate availability information.
+
+    If the working_backwards_ai_critique tool is available, call it once on
+    your completed PRFAQ draft before finalizing. It returns critique from
+    simulated customer personas and domain-expert reviewers. Fold the
+    substantive points into the draft (tighten a weak assumption, add a
+    missing internal FAQ, sharpen the customer problem) and record any you
+    deliberately did not address in appendix_gaps. Treat it as a reviewer,
+    not an author: it does not replace human review, and you never paste
+    its raw output into the PRFAQ. If the tool is not available, proceed
+    without it.
   verbose: true
   allow_delegation: false
 

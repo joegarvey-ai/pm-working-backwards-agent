@@ -10,6 +10,7 @@ from pm_agent_system.tools.prior_art_search import PriorArtSearchTool
 from pm_agent_system.tools.requirements_parser import RequirementsReaderTool
 from pm_agent_system.tools.style_guide_loader import StyleGuideLoaderTool
 from pm_agent_system.tools.tavily_search import TavilySearchTool
+from pm_agent_system.tools.working_backwards_ai import WorkingBackwardsAICritiqueTool
 
 __all__ = [
     "AWSDocsReadTool",
@@ -26,4 +27,5 @@ __all__ = [
     "RequirementsReaderTool",
     "StyleGuideLoaderTool",
     "TavilySearchTool",
+    "WorkingBackwardsAICritiqueTool",
 ]

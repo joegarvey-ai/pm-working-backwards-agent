@@ -203,10 +203,12 @@ def run_crew(
         original_llm_factory=original_llm_factory,
         trace_builder=trace_builder,
         replay_calls=replay_llm_calls,
+        root_span_id=root_span_id,
     )
     tool_interceptor = ToolInterceptor(
         trace_builder=trace_builder,
         replay_calls=replay_tool_calls,
+        root_span_id=root_span_id,
     )
 
     # Wrap all tools on all agents.
@@ -226,6 +228,30 @@ def run_crew(
         # 6. End the root span regardless of success/failure.
         trace_builder.end_span(root_span_id)
         emit_event("crew_end", span_id=root_span_id, run_id=run_id)
+
+    # 6b. Synthesize per-task spans from the recorded llm_call spans,
+    # grouped by task_name (span start = earliest child, end = latest
+    # child). CrewAI does not expose a per-task timing hook here, and the
+    # llm_call spans already carry task_name metadata, so this gives the
+    # LatencyMeter real per-task durations without a task_callback.
+    _task_bounds: dict[str, list[float]] = {}
+    for span in trace_builder.spans:
+        if span.span_type != SpanType.llm_call:
+            continue
+        task_name = span.metadata.get("task_name", "")
+        if not task_name or task_name.startswith("unknown_"):
+            continue
+        bounds = _task_bounds.setdefault(task_name, [span.start_time, span.end_time])
+        bounds[0] = min(bounds[0], span.start_time)
+        bounds[1] = max(bounds[1], span.end_time)
+    for task_name, (t_start, t_end) in _task_bounds.items():
+        trace_builder.add_completed_span(
+            SpanType.task,
+            start_time=t_start,
+            end_time=t_end,
+            parent_span_id=root_span_id,
+            metadata={"task_name": task_name},
+        )
 
     # 7. Build trace and compute summaries.
     trace = trace_builder.build_trace()
