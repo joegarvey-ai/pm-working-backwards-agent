@@ -944,12 +944,12 @@ def _gap_flag_compliance_strategy(draw):
 
 
 _NEW_SECTION_HEADERS = (
-    "## 13.",
-    "## 14.",
-    "## 15.",
-    "## 16.",
-    "## 17.",
-    "## 18.",
+    "## 13. Data Handling",
+    "## 14. Vendor Considerations",
+    "## 15. Privacy Considerations",
+    "## 16. Compliance Gates",
+    "## 17. Launch Readiness Checklist",
+    "## 18. Post-Launch Maintenance",
 )
 
 
@@ -961,13 +961,20 @@ def test_property_5_brd_markdown_has_all_six_section_headers_in_order(compliance
 
     rendered = render_brd_to_markdown(brd)
 
+    # Anchor to whole heading LINES. User-controlled fields (mitigations,
+    # risks, vendor prose, post-launch text) render verbatim into bullets or
+    # paragraphs and can legally contain a "## NN." fragment, so a
+    # whole-document substring count would over-count. A real section heading
+    # is always its own line; a bulleted line is "- ## NN. ...", never equal.
+    lines = rendered.splitlines()
+
     for header in _NEW_SECTION_HEADERS:
-        assert rendered.count(header) == 1, (
+        assert lines.count(header) == 1, (
             f"header {header} should appear exactly once, found "
-            f"{rendered.count(header)}"
+            f"{lines.count(header)}"
         )
 
-    indexes = [rendered.index(header) for header in _NEW_SECTION_HEADERS]
+    indexes = [lines.index(header) for header in _NEW_SECTION_HEADERS]
     assert indexes == sorted(indexes), (
         f"section headers appeared out of declared order: {indexes}"
     )
