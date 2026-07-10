@@ -79,10 +79,20 @@ def _llm(max_tokens: int = _DEFAULT_MAX_TOKENS, agent_key: str = ""):
 
     When MODEL_ROUTING_ENABLED=true and agent_key is provided, routes
     to the appropriate model tier (opus/sonnet/haiku) via the
-    orchestration module. Otherwise returns the default Sonnet model.
+    orchestration module. Otherwise returns the default model (Opus 4.8,
+    or ANTHROPIC_MODEL_ID / BEDROCK_MODEL_ID if set).
 
     Bedrock uses the AWS_BEARER_TOKEN_BEDROCK env var picked up by boto3's
     standard credential chain. Anthropic uses ANTHROPIC_API_KEY.
+
+    Prompt caching note: the largest reusable prefixes (style guide,
+    research context) flow through CrewAI's system-prompt assembly, and
+    crewai's AnthropicCompletion/BedrockCompletion expose no public hook to
+    attach ``cache_control`` to that prefix. Adding caching would require
+    patching crewai internals, which is fragile across upgrades, so it is
+    intentionally deferred until crewai supports it natively. The
+    verification and judge prompts (raw Anthropic/Bedrock calls we do
+    control) sit below the cache minimum, so caching them is a no-op today.
     """
     from pm_agent_system.orchestration import is_routing_enabled, routed_llm
 
