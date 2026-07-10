@@ -10,7 +10,23 @@ lists match the pre-feature baseline.
 
 from __future__ import annotations
 
+import pytest
+
 from pm_agent_system.crew import PmAgentSystem
+
+
+@pytest.fixture(autouse=True)
+def _mcp_disabled(monkeypatch):
+    """Force both MCP integrations off for the whole module.
+
+    The builder_mcp and outlook_mcp tools are gated on the presence of
+    their stdio binaries on PATH (they handle Midway auth themselves), not
+    on token env vars. On an Amazon host where those binaries are
+    installed, deleting env vars no longer disables them, so these
+    'MCP off' baseline tests must patch the enablement gates directly.
+    """
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
 
 
 def _tool_class_names(agent) -> list[str]:

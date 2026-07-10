@@ -117,13 +117,15 @@ def _builder_mcp_enabled() -> bool:
 
 
 def _outlook_mcp_enabled() -> bool:
-    """True when outlook-mcp auth material is present."""
-    if os.getenv("OUTLOOK_MCP_TOKEN", "").strip():
-        return True
-    cookie_path = os.getenv("MIDWAY_COOKIE_PATH", "").strip()
-    if cookie_path and Path(cookie_path).exists():
-        return True
-    return False
+    """True when the canonical ``aws-outlook-mcp`` binary is on PATH.
+
+    Like builder_mcp, the tool now speaks stdio to the binary, which
+    handles Midway auth itself, so the only gate here is whether the
+    binary is installed and reachable. Outside Amazon it is absent and the
+    tool stays unregistered.
+    """
+    import shutil
+    return shutil.which("aws-outlook-mcp") is not None
 
 
 @CrewBase

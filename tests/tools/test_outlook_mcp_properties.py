@@ -257,27 +257,14 @@ def _assert_preserved_keys_unchanged(original, scrubbed) -> None:
 # Strategies for Property 8 (Outlook half)
 # ---------------------------------------------------------------------------
 
-# HTTP status codes for HTTPStatusError simulation.
-http_status_codes = st.integers(min_value=400, max_value=599)
+import asyncio
 
-# Exception types that _run must handle without raising.
+# Exception types the stdio transport can raise that _run must swallow.
 exception_factories = st.sampled_from([
-    "http_status_error",
-    "timeout_exception",
-    "connect_error",
+    "file_not_found",
+    "timeout",
     "generic_exception",
 ])
-
-
-def _make_http_status_error(status_code: int) -> httpx.HTTPStatusError:
-    """Build a realistic httpx.HTTPStatusError with the given status code."""
-    request = httpx.Request("POST", "https://fake-endpoint.example.com/mcp")
-    response = httpx.Response(status_code, request=request, text="server error")
-    return httpx.HTTPStatusError(
-        message=f"HTTP {status_code}",
-        request=request,
-        response=response,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -287,56 +274,40 @@ def _make_http_status_error(status_code: int) -> httpx.HTTPStatusError:
 
 @given(
     exc_type=exception_factories,
-    status_code=http_status_codes,
     query=st.text(min_size=1),
     action=st.sampled_from(VALID_ACTIONS),
 )
 @settings(max_examples=100)
 def test_property_8_outlook_run_never_raises(
     exc_type: str,
-    status_code: int,
     query: str,
     action: str,
 ) -> None:
     """**Validates: Requirements 7.2**
 
-    Property 8 (Outlook half): For any simulated failure in the HTTP
-    transport (httpx.HTTPStatusError with any status, httpx.TimeoutException,
-    httpx.ConnectError, or a generic Exception), OutlookMCPTool._run(...)
-    returns a non-empty string and never propagates the exception.
+    Property 8 (Outlook half): For any simulated failure in the stdio
+    transport (FileNotFoundError for a missing binary, asyncio.TimeoutError,
+    or a generic Exception), OutlookMCPTool._run(...) returns a non-empty
+    string and never propagates the exception.
     """
-    # Set required env vars so auth passes and we reach the transport layer.
-    orig_token = os.environ.get("OUTLOOK_MCP_TOKEN")
-    orig_endpoint = os.environ.get("OUTLOOK_MCP_ENDPOINT")
-    os.environ["OUTLOOK_MCP_TOKEN"] = "test-token-value"
-    os.environ["OUTLOOK_MCP_ENDPOINT"] = "https://fake-endpoint.example.com/mcp"
+    if exc_type == "file_not_found":
+        exc: Exception = FileNotFoundError("aws-outlook-mcp not on PATH")
+    elif exc_type == "timeout":
+        exc = asyncio.TimeoutError("call timed out")
+    else:
+        exc = Exception("something went wrong")
 
-    try:
-        # Build the exception to raise.
-        if exc_type == "http_status_error":
-            exc = _make_http_status_error(status_code)
-        elif exc_type == "timeout_exception":
-            exc = httpx.TimeoutException("connection timed out")
-        elif exc_type == "connect_error":
-            exc = httpx.ConnectError("connection refused")
-        else:
-            exc = Exception("something went wrong")
+    tool = OutlookMCPTool()
 
-        tool = OutlookMCPTool()
+    with patch(
+        "pm_agent_system.tools._mcp_stdio.is_binary_available",
+        return_value=True,
+    ), patch(
+        "pm_agent_system.tools.outlook_mcp._mcp_stdio.call_stdio_mcp",
+        side_effect=exc,
+    ):
+        result = tool._run(query=query, action=action)
 
-        with patch("pm_agent_system.tools._mcp_jsonrpc.call_mcp", side_effect=exc):
-            result = tool._run(query=query, action=action)
-
-        # _run must return a non-empty string describing the error.
-        assert isinstance(result, str)
-        assert len(result) > 0
-    finally:
-        # Restore original env state.
-        if orig_token is None:
-            os.environ.pop("OUTLOOK_MCP_TOKEN", None)
-        else:
-            os.environ["OUTLOOK_MCP_TOKEN"] = orig_token
-        if orig_endpoint is None:
-            os.environ.pop("OUTLOOK_MCP_ENDPOINT", None)
-        else:
-            os.environ["OUTLOOK_MCP_ENDPOINT"] = orig_endpoint
+    # _run must return a non-empty string describing the error.
+    assert isinstance(result, str)
+    assert len(result) > 0
