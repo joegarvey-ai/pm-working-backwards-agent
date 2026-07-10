@@ -49,6 +49,37 @@ class TraceBuilder:
         if self._stack and self._stack[-1] == span_id:
             self._stack.pop()
 
+    def add_completed_span(
+        self,
+        span_type: SpanType,
+        start_time: float,
+        end_time: float,
+        parent_span_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """Record an already-finished span with explicit start/end times.
+
+        Unlike ``start_span``/``end_span``, this does not touch the parent
+        stack, so it is safe to call from the tool/LLM interceptors, which
+        run concurrently under ``async_execution`` and record their own
+        timing. The span is parented to ``parent_span_id`` (typically the
+        root crew span) rather than to whatever happens to be on top of the
+        stack at the time.
+        """
+        span_id = str(uuid.uuid4())
+        parent = parent_span_id if parent_span_id is not None else (self._stack[-1] if self._stack else None)
+        self.spans.append(
+            Span(
+                span_id=span_id,
+                parent_span_id=parent,
+                span_type=span_type,
+                start_time=start_time,
+                end_time=end_time,
+                metadata=metadata or {},
+            )
+        )
+        return span_id
+
     def build_trace(self) -> Trace:
         """Return the completed :class:`Trace`."""
         return Trace(spans=list(self.spans))
