@@ -794,6 +794,8 @@ def cmd_revise(args: argparse.Namespace) -> None:
     if vault_cfg:
         generate_index_note(product_slug, vault_cfg)
 
+    _maybe_open_html(working_copy, args)
+
 
 # ---------- Subcommand: full-pipeline (Agents 1 → 2 → 3) ----------
 
@@ -1789,6 +1791,8 @@ def cmd_build_spec(args: argparse.Namespace) -> None:
     if vault_cfg:
         generate_index_note(product_slug, vault_cfg)
 
+    _maybe_open_html(ref_path, args)
+
 
 # ---------- Subcommand: revise-brd (Agent 4 Mode 2) ----------
 
@@ -1901,6 +1905,8 @@ def cmd_revise_brd(args: argparse.Namespace) -> None:
     if vault_cfg_for_provider:
         generate_index_note(product_slug, vault_cfg_for_provider)
 
+    _maybe_open_html(working_copy, args)
+
 
 # ---------- Subcommand: wireframes (Agent 3 standalone) ----------
 
@@ -1997,6 +2003,8 @@ def cmd_wireframes(args: argparse.Namespace) -> None:
     if vault_cfg and product_slug:
         copy_input_brief_to_vault(args.input_file, product_slug, vault_cfg)
         generate_index_note(product_slug, vault_cfg, input_path=args.input_file)
+
+    _maybe_open_html(working_copy, args)
 
 
 # ---------- Subcommand: revise-wireframes (Agent 3 Mode 2) ----------
@@ -2113,6 +2121,8 @@ def cmd_revise_wireframes(args: argparse.Namespace) -> None:
 
     if vault_cfg_for_provider:
         generate_index_note(product_slug, vault_cfg_for_provider)
+
+    _maybe_open_html(working_copy, args)
 
 
 # ---------- Subcommand: diff ----------
@@ -2468,6 +2478,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_revise.add_argument(
         "--context-text", help="Inline revision instructions"
     )
+    p_revise.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_revise.set_defaults(func=cmd_revise)
 
     # ----- Agent 4 commands -----
@@ -2545,6 +2556,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_spec.add_argument("--brd-path", required=True, help="Path to approved BRD markdown")
     p_spec.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
+    p_spec.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_spec.set_defaults(func=cmd_build_spec)
 
     p_rbrd = sub.add_parser(
@@ -2554,6 +2566,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rbrd.add_argument("--brd-path", required=True, help="Path to current BRD markdown")
     p_rbrd.add_argument("--context-path", help="File or folder with revision context")
     p_rbrd.add_argument("--context-text", help="Inline revision instructions")
+    p_rbrd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_rbrd.set_defaults(func=cmd_revise_brd)
 
     # ----- Agent 3 commands -----
@@ -2565,6 +2578,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_wire.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
     p_wire.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
     p_wire.add_argument("--research-path", help="Optional path to research brief markdown")
+    p_wire.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_wire.set_defaults(func=cmd_wireframes)
 
     p_rwire = sub.add_parser(
@@ -2574,6 +2588,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rwire.add_argument("--design-brief-path", required=True, help="Path to current design brief markdown")
     p_rwire.add_argument("--context-path", help="File or folder with revision context")
     p_rwire.add_argument("--context-text", help="Inline revision instructions")
+    p_rwire.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
     p_rwire.set_defaults(func=cmd_revise_wireframes)
 
     p_clean = sub.add_parser("clean", help="Manage output retention (archive/list/delete)")
@@ -2677,6 +2692,19 @@ _LLM_COMMANDS = frozenset({
 _TAVILY_COMMANDS = frozenset({"research", "generate", "full-pipeline", "brd"})
 
 _PLACEHOLDER_MARKERS = ("your_", "_here", "changeme", "xxxx")
+
+
+def _maybe_open_html(path, args: argparse.Namespace) -> None:
+    """Open the HTML sibling of ``path`` in a browser when --open was passed.
+
+    No-op when the command has no --open flag, the flag is unset, or the
+    HTML file does not exist. ``path`` may be a str or Path.
+    """
+    if not getattr(args, "open", False) or not path:
+        return
+    html_path = Path(path).with_suffix(".html")
+    if html_path.exists():
+        webbrowser.open(html_path.resolve().as_uri())
 
 
 def _resolve_sequential_brd(args: argparse.Namespace) -> bool:

@@ -176,15 +176,17 @@ Input file arguments below accept either `.md` (recommended) or `.yaml`/`.yml`.
 | Command | What it does |
 |---|---|
 | `research <input>` | Run Agent 1 only. Produces a research brief. |
-| `generate <input>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. |
+| `generate <input>` | Run Agents 1 + 2. Produces a research brief and a PRFAQ v1.0. Pass `--research-path <file>` to reuse an existing research brief and skip Agent 1. |
 | `revise --prfaq-path <file>` | Run Agent 2 to revise an existing PRFAQ. Pass `--context-text` or `--context-path` for the revision notes. |
 | `wireframes <input> --prfaq-path <file>` | Run Agent 3 only. Produces a design brief from an approved PRFAQ. Pass `--research-path` to ground competitive UI patterns. |
 | `revise-wireframes --design-brief-path <file>` | Revise an existing design brief. Pass `--context-text` or `--context-path` for the revision notes. |
 | `full-pipeline <input>` | Run all agents end to end. Produces research brief, PRFAQ, design brief, BRD, and build spec. Add `--skip-design` to run the three-agent pipeline without Agent 3. |
-| `brd <input> --prfaq-path <file>` | Run Agent 4 to produce a BRD and build spec from an approved PRFAQ. Pass `--design-brief-path` to have the BRD reference screen names and flows. |
+| `brd <input> --prfaq-path <file>` | Run Agent 4 to produce a BRD and build spec from an approved PRFAQ. Pass `--design-brief-path` to have the BRD reference screen names and flows, `--verify` to run the advisory PRFAQ check first, and `--sequential-brd` to run the BRD sub-steps sequentially (auto-enabled on Bedrock). |
 | `build-spec --brd-path <file>` | Regenerate just the build spec from an approved BRD. Useful when switching `--target-tool`. |
 | `revise-brd --brd-path <file>` | Revise an existing BRD. Pass `--context-text` or `--context-path` for the revision notes. |
 | `diff <old> <new>` | Compare two document versions section by section. Shows which sections were added, removed, or changed. Works best with agent-generated document pairs — manual header renames between versions appear as a deletion plus an addition rather than a single change. |
+| `view <artifact>` | Open a generated artifact in a terminal viewer (requires the `[ui]` extra: `uv pip install 'pm-working-backwards-agent[ui]'`). |
+| `feedback status` / `feedback classify` | Show the stakeholder feedback inbox dashboard, or route each open feedback item to the artifacts and sections it affects. |
 | `clean --archive` / `--list` / `--delete-archive` | Manage the `./output/` directory retention policy. |
 
 Run `uv run pm_agent_system <command> --help` for the full options on any command.
@@ -247,11 +249,11 @@ Routing produced +0.8 improvement on PRFAQ fidelity scores (3.2 to 4.0/5) while 
 Every pipeline run can be recorded and replayed without API calls:
 
 ```bash
-# Record a run
-uv run python -c "from tests.harness import run_crew; ..."
+# Record a run (writes a golden recording to the given path)
+uv run python -c "import yaml; from tests.harness import run_crew; from pm_agent_system.crew import PmAgentSystem; inputs = yaml.safe_load(open('examples/input.yaml')); crew = PmAgentSystem().research_crew(skip_validation=True); run_crew(crew, inputs, output_path='tests/recordings/research_baseline.json')"
 
 # Replay (instant, no API cost)
-uv run python -c "from tests.harness import run_crew; run_crew(crew, inputs, replay_path='tests/recordings/research_baseline.json')"
+uv run python -c "import yaml; from tests.harness import run_crew; from pm_agent_system.crew import PmAgentSystem; inputs = yaml.safe_load(open('examples/input.yaml')); crew = PmAgentSystem().research_crew(skip_validation=True); run_crew(crew, inputs, replay_path='tests/recordings/research_baseline.json')"
 ```
 
 Golden recordings in `tests/recordings/` serve as regression baselines. CI replays them on every push.
@@ -266,20 +268,21 @@ Three LLM-as-judge evaluators score outputs on a 1-5 rubric:
 
 ### Verification Gate
 
-An inter-stage quality gate checks each output before the next stage consumes it:
+An advisory quality gate checks the approved PRFAQ before the BRD stage consumes it. Add `--verify` to the `brd` command:
 
-```python
-from pm_agent_system.verification import run_verified_pipeline
-result = run_verified_pipeline(inputs, stages=["research", "prfaq"])
+```bash
+uv run pm_agent_system brd input/my-product.md --prfaq-path output/prfaq_v1.0.md --verify
 ```
 
-Catches: style drift, factual inconsistencies between stages, citation loss, and customer-problem grounding failures.
+It reports style drift, factual inconsistencies, citation loss, and customer-problem grounding failures, then asks before proceeding if it finds an error. It warns rather than hard-blocking, and degrades to a warning if the verifier itself cannot run.
 
 ### Trend Reporting and Trace Export
 
 ```bash
-# Cost/latency/quality trends across recordings
-uv run python -m pm_agent_system.harness_trends --since 7d
+# Cost/latency/quality trends across recordings. --since filters by
+# recording creation date, so widen the window to include older baselines
+# (the bundled recordings predate a 7-day window).
+uv run python -m pm_agent_system.harness_trends --since 365d
 
 # Visual flamegraph timeline (self-contained HTML)
 uv run python -m pm_agent_system.trace_export tests/recordings/prfaq_baseline.json
