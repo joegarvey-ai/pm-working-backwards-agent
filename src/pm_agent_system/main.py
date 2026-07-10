@@ -1285,7 +1285,9 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                 t0_pipeline = time.monotonic()
                 task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
                 crew = PmAgentSystem().full_pipeline_crew(
-                    skip_validation=skip, skip_design=skip_design
+                    skip_validation=skip,
+                    skip_design=skip_design,
+                    sequential_brd=_resolve_sequential_brd(args),
                 )
                 crew.task_callback = _task_callback
                 result = crew.kickoff(inputs=crew_inputs)
@@ -1400,6 +1402,45 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
 # ---------- Subcommand: brd (Agent 4, BRD + build spec from approved PRFAQ) ----------
 
 
+def _run_prfaq_verification_gate(prfaq_path: Path, inputs: dict) -> None:
+    """Advisory inter-stage gate between PRFAQ and BRD (opt-in via --verify).
+
+    Runs the verification check on the approved PRFAQ before the BRD stage
+    consumes it, per the CLAUDE.md workflow. Never hard-blocks: it prints a
+    conversational summary, and on an error-severity issue asks the PM
+    whether to proceed. Any verifier failure (e.g. missing provider creds)
+    degrades to a warning so it can never stop a real run.
+    """
+    try:
+        from pm_agent_system.verification import verify_stage
+
+        prfaq_text = prfaq_path.read_text(encoding="utf-8")
+        brief_text = yaml.dump(inputs, default_flow_style=False, sort_keys=False)
+        result = verify_stage(
+            stage_output=prfaq_text, input_brief=brief_text, stage_name="prfaq"
+        )
+    except Exception as exc:  # noqa: BLE001 — advisory only, never block a run
+        print(f"\n(Verification gate skipped: {exc})")
+        return
+
+    errors = [i for i in result.issues if i.severity == "error"]
+    warnings = [i for i in result.issues if i.severity != "error"]
+    print(f"\nVerification gate (PRFAQ → BRD): {result.summary or 'no summary'}")
+    if not result.issues:
+        print("  No style, consistency, sourcing, or grounding issues found.")
+        return
+    for issue in errors + warnings:
+        print(f"  [{issue.severity}] {issue.category}: {issue.description}")
+    if errors:
+        try:
+            resp = input("\n1 or more errors above. Proceed to BRD anyway? [y/N]: ").strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            print("Stopping. Revise the PRFAQ, then re-run.")
+            sys.exit(0)
+
+
 def cmd_brd(args: argparse.Namespace) -> None:
     inputs = validate_input(parse_input(args.input_file))
     prfaq_path = Path(args.prfaq_path).expanduser().resolve()
@@ -1414,6 +1455,9 @@ def cmd_brd(args: argparse.Namespace) -> None:
             prfaq_path = Path(resolve_artifact_path("prfaq", product_slug, vault_cfg, str(prfaq_path)))
         except FileNotFoundError:
             pass
+
+    if getattr(args, "verify", False):
+        _run_prfaq_verification_gate(prfaq_path, inputs)
 
     research_path_arg = ""
     if args.research_path:
@@ -1540,7 +1584,9 @@ def cmd_brd(args: argparse.Namespace) -> None:
     try:
         try:
             t0 = time.monotonic()
-            crew = PmAgentSystem().split_brd_crew()
+            crew = PmAgentSystem().split_brd_crew(
+                sequential_brd=_resolve_sequential_brd(args)
+            )
             crew.task_callback = _task_callback
             result = crew.kickoff(inputs=crew_inputs)
             elapsed = time.monotonic() - t0
@@ -2457,6 +2503,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip Agent 3 (design brief) and run the three-agent pipeline as before",
     )
     p_full.add_argument("--open", action="store_true", help="Open the final HTML artifact in the default browser when done")
+    p_full.add_argument(
+        "--sequential-brd",
+        action="store_true",
+        help="Run the BRD structure/cost/compliance steps sequentially instead of in parallel. Slower but avoids the Bedrock toolResult race. Auto-enabled when LLM_PROVIDER=bedrock.",
+    )
     p_full.set_defaults(func=cmd_full_pipeline)
 
     p_brd = sub.add_parser(
@@ -2476,6 +2527,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_brd.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
     p_brd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
+    p_brd.add_argument(
+        "--sequential-brd",
+        action="store_true",
+        help="Run the BRD structure/cost/compliance steps sequentially instead of in parallel. Slower but avoids the Bedrock toolResult race. Auto-enabled when LLM_PROVIDER=bedrock.",
+    )
+    p_brd.add_argument(
+        "--verify",
+        action="store_true",
+        help="Run the advisory verification gate on the PRFAQ before generating the BRD (style, consistency, sourcing, grounding). Warns; does not hard-block.",
+    )
     p_brd.set_defaults(func=cmd_brd)
 
     p_spec = sub.add_parser(
@@ -2616,6 +2677,19 @@ _LLM_COMMANDS = frozenset({
 _TAVILY_COMMANDS = frozenset({"research", "generate", "full-pipeline", "brd"})
 
 _PLACEHOLDER_MARKERS = ("your_", "_here", "changeme", "xxxx")
+
+
+def _resolve_sequential_brd(args: argparse.Namespace) -> bool:
+    """True when the split BRD siblings should run sequentially.
+
+    Honors an explicit --sequential-brd flag, and auto-enables it on
+    Bedrock, where parallel siblings can hit the toolResult interleaving
+    race. On the Anthropic provider the parallel path is the default for
+    speed.
+    """
+    if getattr(args, "sequential_brd", False):
+        return True
+    return os.getenv("LLM_PROVIDER", "anthropic").strip().lower() == "bedrock"
 
 
 def _is_placeholder(value: str) -> bool:
