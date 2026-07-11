@@ -34,7 +34,6 @@ from pm_agent_system.checkpoint import (
     delete_checkpoint,
     load_checkpoint,
     new_checkpoint,
-    record_artifact,
     save_checkpoint,
 )
 from pm_agent_system.crew import PmAgentSystem, _MODEL
@@ -53,6 +52,12 @@ from pm_agent_system.io_layer import (  # noqa: F401  (re-exported for callers/t
     save_design_brief,
     save_markdown_brief,
     save_prfaq,
+)
+from pm_agent_system.crew_runner import (  # noqa: F401  (re-exported for callers/tests)
+    _PYDANTIC_TO_ARTIFACT,
+    make_build_spec_render,
+    make_pipeline_task_callback,
+    record_artifact_from_task_output as _record_artifact_from_task_output,
 )
 from pm_agent_system.metrics_report import (  # noqa: F401  (re-exported for callers/tests)
     _extract_agent_usage,
@@ -185,16 +190,6 @@ def validate_publish_destination(destination: str) -> Path | None:
 
 
 # ---------- Checkpoint provider helpers ----------
-
-# Maps Pydantic output classes to their artifact_type label, used by the few
-# post-kickoff hooks that need to know which artifact a TaskOutput corresponds to.
-_PYDANTIC_TO_ARTIFACT: dict[type, str] = {
-    ResearchOutput: "research_brief",
-    PRFAQOutput: "prfaq",
-    DesignBriefOutput: "design_brief",
-    BRDOutput: "brd",
-    CodingPromptOutput: "build_spec",
-}
 
 
 def _install_checkpoint_provider(
@@ -641,87 +636,6 @@ def cmd_revise(args: argparse.Namespace) -> None:
 # ---------- Subcommand: full-pipeline (Agents 1 → 2 → 3) ----------
 
 
-def _record_artifact_from_task_output(
-    task_output,
-    label,
-    slug,
-    output_dir,
-    checkpoint,
-    provider,
-    vault_config=None,
-    product_slug=None,
-):
-    """Update the resume checkpoint from a TaskOutput.
-
-    Normal flow: the VaultCheckpointProvider has already written the artifact to
-    output/ and the vault (handle_feedback fires BEFORE task_callback). In that
-    case we just record the path that the provider wrote.
-
-    Fallback flow: if the provider has no record for this artifact type (e.g. the
-    crew ran without human_input, or a test mocked kickoff past the provider), we
-    write the artifact here so the pipeline still produces files. This keeps the
-    callback safe as a last-resort writer.
-
-    Also handles BRD Jira/Linear exports which the provider does not produce.
-    """
-    if not hasattr(task_output, "pydantic") or task_output.pydantic is None:
-        return None
-
-    obj = task_output.pydantic
-    artifact_type = _PYDANTIC_TO_ARTIFACT.get(type(obj))
-    if artifact_type is None:
-        return None
-
-    record = provider.artifacts.get(artifact_type) if provider else None
-
-    if record is None:
-        # Provider didn't fire — fallback write so the pipeline still produces files.
-        if isinstance(obj, ResearchOutput):
-            md = render_research_to_markdown(obj)
-            path = save_markdown_brief(md)
-            if vault_config and product_slug:
-                write_to_vault(md, "research_brief", product_slug, "1.0", vault_config,
-                               downstream="prfaq")
-        elif isinstance(obj, PRFAQOutput):
-            version = _prfaq_version_from_output(obj)
-            md = render_prfaq_to_markdown(obj, slug=slug)
-            path = save_prfaq(md, label, version)
-            if vault_config and product_slug:
-                write_to_vault(md, "prfaq", product_slug, version, vault_config,
-                               upstream="research_brief", downstream="design_brief")
-        elif isinstance(obj, DesignBriefOutput):
-            md = render_design_brief_to_markdown(obj, slug=slug)
-            path = save_design_brief(md, label, "1.0")
-            if vault_config and product_slug:
-                write_to_vault(md, "design_brief", product_slug, "1.0", vault_config,
-                               upstream="prfaq", downstream="brd")
-        elif isinstance(obj, BRDOutput):
-            version = _brd_version_from_output(obj)
-            md = render_brd_to_markdown(obj, slug=slug)
-            path = save_brd(md, label, version)
-            save_brd_exports(obj, label)
-            if vault_config and product_slug:
-                write_to_vault(md, "brd", product_slug, version, vault_config,
-                               upstream="prfaq", downstream="build_spec")
-        else:
-            return None
-        record_artifact(checkpoint, artifact_type, str(path))
-        save_checkpoint(output_dir, checkpoint)
-        return artifact_type
-
-    # Provider already wrote — record path, add exports where relevant.
-    record_artifact(checkpoint, artifact_type, str(record.output_path))
-    save_checkpoint(output_dir, checkpoint)
-
-    if isinstance(obj, BRDOutput):
-        try:
-            save_brd_exports(obj, label)
-        except Exception as exc:
-            logger.warning("Failed to save BRD exports: %s", exc)
-
-    return artifact_type
-
-
 def cmd_full_pipeline(args: argparse.Namespace) -> None:
     inputs = validate_input(parse_input(args.input_file))
     publish_dir = validate_publish_destination(inputs.get("publish_destination", ""))
@@ -825,22 +739,8 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     # stub and RACI matrix to spec.formatted_spec before save and render.
     brd_holder: dict[str, BRDOutput] = {}
 
-    def _make_build_spec_render(original_render_fn):
-        def _render(obj: CodingPromptOutput) -> str:
-            brd_obj = brd_holder.get("brd")
-            if brd_obj is not None:
-                try:
-                    from pm_agent_system.utils.render_build_spec import (
-                        _augment_spec_with_stride_raci,
-                    )
-                    _augment_spec_with_stride_raci(obj, brd_obj)
-                except Exception as exc:
-                    logger.warning("STRIDE and RACI augmentation skipped: %s", exc)
-            return original_render_fn(obj)
-        return _render
-
-    _build_spec_render_fn = _make_build_spec_render(
-        lambda obj: render_build_spec_to_markdown(obj, slug=slug)
+    _build_spec_render_fn = make_build_spec_render(
+        lambda obj: render_build_spec_to_markdown(obj, slug=slug), brd_holder
     )
 
     handlers = [
@@ -943,29 +843,15 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             crew_inputs["research_path"] = research_file
             crew_inputs["design_brief_path"] = design_file
 
-            def _resume_task_callback(task_output):
-                now = time.monotonic()
-                task_name = (
-                    getattr(task_output, "name", None)
-                    or type(getattr(task_output, "pydantic", None)).__name__
-                    or "unknown"
-                )
-                # Stash the BRDOutput so the build_spec render hook can append
-                # the deterministic STRIDE stub and RACI matrix before save.
-                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
-                    brd_holder["brd"] = task_output.pydantic
-                # Absolute completion time from pipeline start.
-                task_timings[task_name] = now - t0_pipeline
-                _record_artifact_from_task_output(
-                    task_output, label, slug, output_dir, checkpoint, provider,
-                    vault_config=vault_cfg, product_slug=product_slug,
-                )
-
             try:
                 t0_pipeline = time.monotonic()
                 task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
                 crew = PmAgentSystem().brd_from_prfaq_crew()
-                crew.task_callback = _resume_task_callback
+                crew.task_callback = make_pipeline_task_callback(
+                    brd_holder=brd_holder, task_timings=task_timings, t0=t0_pipeline,
+                    label=label, slug=slug, output_dir=output_dir, checkpoint=checkpoint,
+                    provider=provider, vault_cfg=vault_cfg, product_slug=product_slug,
+                )
                 result = crew.kickoff(inputs=crew_inputs)
                 elapsed_pipeline = time.monotonic() - t0_pipeline
             except Exception as e:
@@ -985,26 +871,6 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             print(f"Target tool for build spec: {target_tool}")
             print("Human review checkpoints will pause after each agent.\n")
 
-            def _task_callback(task_output):
-                now = time.monotonic()
-                task_name = (
-                    getattr(task_output, "name", None)
-                    or type(getattr(task_output, "pydantic", None)).__name__
-                    or "unknown"
-                )
-                # Stash the BRDOutput so the build_spec render hook can append
-                # the deterministic STRIDE stub and RACI matrix before save.
-                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
-                    brd_holder["brd"] = task_output.pydantic
-                # Absolute completion time from pipeline start.
-                # Under async execution, tasks complete out of order, so
-                # absolute timestamps let us see overlap vs sequential.
-                task_timings[task_name] = now - t0_pipeline
-                _record_artifact_from_task_output(
-                    task_output, label, slug, output_dir, checkpoint, provider,
-                    vault_config=vault_cfg, product_slug=product_slug,
-                )
-
             try:
                 t0_pipeline = time.monotonic()
                 task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
@@ -1013,7 +879,11 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     skip_design=skip_design,
                     sequential_brd=_resolve_sequential_brd(args),
                 )
-                crew.task_callback = _task_callback
+                crew.task_callback = make_pipeline_task_callback(
+                    brd_holder=brd_holder, task_timings=task_timings, t0=t0_pipeline,
+                    label=label, slug=slug, output_dir=output_dir, checkpoint=checkpoint,
+                    provider=provider, vault_cfg=vault_cfg, product_slug=product_slug,
+                )
                 result = crew.kickoff(inputs=crew_inputs)
                 elapsed_pipeline = time.monotonic() - t0_pipeline
             except Exception as e:
@@ -1244,22 +1114,8 @@ def cmd_brd(args: argparse.Namespace) -> None:
     # stub and RACI matrix to spec.formatted_spec before save and render.
     brd_holder: dict[str, BRDOutput] = {}
 
-    def _make_build_spec_render(original_render_fn):
-        def _render(obj: CodingPromptOutput) -> str:
-            brd_obj = brd_holder.get("brd")
-            if brd_obj is not None:
-                try:
-                    from pm_agent_system.utils.render_build_spec import (
-                        _augment_spec_with_stride_raci,
-                    )
-                    _augment_spec_with_stride_raci(obj, brd_obj)
-                except Exception as exc:
-                    logger.warning("STRIDE and RACI augmentation skipped: %s", exc)
-            return original_render_fn(obj)
-        return _render
-
-    _build_spec_render_fn = _make_build_spec_render(
-        lambda obj: render_build_spec_to_markdown(obj, slug=slug)
+    _build_spec_render_fn = make_build_spec_render(
+        lambda obj: render_build_spec_to_markdown(obj, slug=slug), brd_holder
     )
 
     provider, token = _install_checkpoint_provider(
