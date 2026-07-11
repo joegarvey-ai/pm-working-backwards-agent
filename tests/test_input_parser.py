@@ -347,3 +347,71 @@ def test_yaml_and_markdown_produce_same_dict() -> None:
     assert not mismatches, "value mismatches:\n" + "\n".join(
         f"  {k}: yaml={y!r} md={m!r}" for k, y, m in mismatches
     )
+
+
+# ---------- encoding tolerance (Windows PM input) ----------
+
+
+def _write_bytes(tmp_path: Path, name: str, data: bytes) -> str:
+    path = tmp_path / name
+    path.write_bytes(data)
+    return str(path)
+
+
+def test_parse_markdown_cp1252(tmp_path: Path) -> None:
+    """A brief pasted from Word/Outlook (cp1252 smart quotes, em dash) parses
+    instead of crashing with UnicodeDecodeError, recovering the characters."""
+    text = (
+        "## Product Name\n\nWidget\n\n"
+        "## Feature / Idea Summary\n\nWe’re building a “smart” tool — really.\n"
+    )
+    path = _write_bytes(tmp_path, "cp1252.md", text.encode("cp1252"))
+
+    result = parse_markdown_input(path)
+
+    assert result["product_name"] == "Widget"
+    summary = result["feature_summary"]
+    assert "’" in summary  # right single quote
+    assert "“" in summary and "”" in summary  # curly double quotes
+    assert "—" in summary  # em dash
+
+
+def test_parse_markdown_utf8_bom(tmp_path: Path) -> None:
+    """A UTF-8 file saved with a BOM (Windows Notepad) does not leak a U+FEFF
+    into the first heading; the product name is read cleanly."""
+    data = b"\xef\xbb\xbf" + "## Product Name\n\nWidget\n".encode("utf-8")
+    path = _write_bytes(tmp_path, "bom.md", data)
+
+    result = parse_markdown_input(path)
+
+    assert result["product_name"] == "Widget"
+
+
+def test_parse_markdown_undefined_bytes_does_not_crash(tmp_path: Path) -> None:
+    """Genuinely undecodable bytes fall back to replacement rather than
+    aborting the whole command with a traceback."""
+    data = "## Product Name\n\nWidget\n\n## Feature / Idea Summary\n\n".encode("utf-8")
+    data += bytes([0x81, 0x90]) + b"\n"  # undefined in cp1252, invalid utf-8
+    path = _write_bytes(tmp_path, "garbage.md", data)
+
+    result = parse_markdown_input(path)  # must not raise
+
+    assert result["product_name"] == "Widget"
+
+
+def test_parse_yaml_cp1252(tmp_path: Path) -> None:
+    """A cp1252-encoded YAML value with a smart quote is recovered."""
+    text = 'product_name: "Widget’s"\nfeature_summary: "Do a thing."\n'
+    path = _write_bytes(tmp_path, "input.yaml", text.encode("cp1252"))
+
+    result = parse_yaml_input(path)
+
+    assert result["product_name"] == "Widget’s"
+
+
+def test_parse_yaml_non_mapping_returns_empty(tmp_path: Path) -> None:
+    """A top-level scalar/list (not a mapping) returns {} so validation can
+    report missing fields cleanly instead of raising AttributeError."""
+    path = _write_bytes(tmp_path, "prose.yaml", b"just prose, not a mapping\n")
+
+    assert parse_yaml_input(path) == {}

@@ -1,3 +1,12 @@
+> **Superseded (2026-07-10).** This document specifies an HTTP JSON-RPC transport
+> (`BUILDER_MCP_ENDPOINT` / `OUTLOOK_MCP_ENDPOINT` with bearer-token / Midway-cookie
+> auth). The shipped implementation instead speaks **stdio** to the canonical
+> `builder-mcp` and `aws-outlook-mcp` binaries — see
+> `src/pm_agent_system/tools/builder_mcp.py`, `outlook_mcp.py`, and `_mcp_stdio.py` —
+> which handle Midway auth themselves and are gated only on the binary being on
+> `PATH`. Retained for historical design context; do not treat the JSON-RPC
+> transport details below as current.
+
 # Design Document
 
 ## Overview

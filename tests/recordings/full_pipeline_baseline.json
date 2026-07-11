@@ -621,7 +621,7 @@
       "input_args": {
         "file_path": ""
       },
-      "return_value": "Error: C:\\Users\\joegarve\\Desktop\\pm-working-backwards-agent is not a file.",
+      "return_value": "Error: /path/to/workspace is not a file.",
       "duration_s": 0.0053813999984413385,
       "error_class": null,
       "error_message": null,
@@ -1572,7 +1572,7 @@
         },
         {
           "role": "tool",
-          "content": "Error: C:\\Users\\joegarve\\Desktop\\pm-working-backwards-agent is not a file."
+          "content": "Error: /path/to/workspace is not a file."
         },
         {
           "role": "tool",

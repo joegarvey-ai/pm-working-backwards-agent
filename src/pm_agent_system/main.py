@@ -335,6 +335,27 @@ def _retention_days() -> int:
         return 30
 
 
+def _append_usage_log(entry: dict, log_path: Path, max_bytes: int = 5 * 1024 * 1024) -> None:
+    """Append one JSON line to the usage log, rotating at max_bytes.
+
+    Size-based rotation keeps a single backup (usage_log.jsonl.1). The log is
+    write-only (nothing reads it back), so rotation never drops history a
+    report needs. Non-blocking: logging must never fail a real run.
+    """
+    import json
+
+    try:
+        if log_path.exists() and log_path.stat().st_size >= max_bytes:
+            backup = log_path.with_name(log_path.name + ".1")
+            if backup.exists():
+                backup.unlink()
+            log_path.rename(backup)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass  # Non-blocking; don't fail the command over logging
+
+
 def save_markdown_brief(markdown: str) -> Path:
     """Write the rendered research brief to OUTPUT_DIR with a timestamped name."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -912,7 +933,6 @@ def _print_run_metrics(result, command: str, elapsed_seconds: float, product_slu
     print(f"Elapsed: {elapsed_seconds:.1f}s")
 
     # Append to JSONL log
-    import json
     log_entry = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "command": command,
@@ -923,12 +943,7 @@ def _print_run_metrics(result, command: str, elapsed_seconds: float, product_slu
         "elapsed_seconds": round(elapsed_seconds, 1),
         "product_slug": product_slug,
     }
-    log_path = _output_dir() / "usage_log.jsonl"
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_entry) + "\n")
-    except OSError:
-        pass  # Non-blocking; don't fail the command over logging
+    _append_usage_log(log_entry, _output_dir() / "usage_log.jsonl")
 
 
 def _record_artifact_from_task_output(
@@ -1370,7 +1385,6 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     print(f"\nTotal pipeline elapsed (includes review pauses): {elapsed_pipeline:.1f}s")
 
     # Append to usage_log.jsonl for trend analysis
-    import json as _json
     total_in = sum(u.get("input_tokens", 0) for u in _extract_agent_usage(result).values())
     total_out = sum(u.get("output_tokens", 0) for u in _extract_agent_usage(result).values())
     total_cost = estimate_cost(_MODEL, total_in, total_out)
@@ -1386,12 +1400,7 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
         "per_task_elapsed": {k: round(v, 1) for k, v in timings_display.items()},
         "skip_design": skip_design,
     }
-    log_path = output_dir / "usage_log.jsonl"
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(_json.dumps(log_entry) + "\n")
-    except OSError:
-        pass
+    _append_usage_log(log_entry, output_dir / "usage_log.jsonl")
 
     # Pipeline complete — delete checkpoint
     delete_checkpoint(output_dir)
