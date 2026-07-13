@@ -19,7 +19,6 @@ import argparse
 import logging
 import os
 import re
-import shutil
 import sys
 import time
 import warnings
@@ -35,13 +34,45 @@ from pm_agent_system.checkpoint import (
     delete_checkpoint,
     load_checkpoint,
     new_checkpoint,
-    record_artifact,
     save_checkpoint,
 )
 from pm_agent_system.crew import PmAgentSystem, _MODEL
-from pm_agent_system.html_export import markdown_to_html
 from pm_agent_system.input_parser import parse_input
-from pm_agent_system.pricing import estimate_cost, format_cost_summary
+from pm_agent_system.io_layer import (  # noqa: F401  (re-exported for callers/tests)
+    _append_usage_log,
+    _archive_dir,
+    _output_dir,
+    _retention_days,
+    _slugify,
+    enforce_retention_policy,
+    publish_output,
+    save_brd,
+    save_brd_exports,
+    save_build_spec,
+    save_design_brief,
+    save_markdown_brief,
+    save_prfaq,
+)
+from pm_agent_system.crew_runner import (  # noqa: F401  (re-exported for callers/tests)
+    _PYDANTIC_TO_ARTIFACT,
+    make_build_spec_render,
+    make_pipeline_task_callback,
+    record_artifact_from_task_output as _record_artifact_from_task_output,
+)
+from pm_agent_system.metrics_report import (  # noqa: F401  (re-exported for callers/tests)
+    _extract_agent_usage,
+    _print_cost_summary,
+    _print_run_metrics,
+)
+from pm_agent_system.versioning import (  # noqa: F401  (re-exported for callers/tests)
+    FRONTMATTER_RE,
+    _brd_version_from_output,
+    _prfaq_version_from_output,
+    bump_version,
+    read_current_version,
+    read_frontmatter,
+)
+from pm_agent_system.pricing import estimate_cost
 from pm_agent_system.models import (
     VALID_TARGET_TOOLS,
     BRDOutput,
@@ -51,9 +82,6 @@ from pm_agent_system.models import (
     ResearchOutput,
 )
 from pm_agent_system.utils import (
-    export_jira_csv,
-    export_linear_markdown,
-    formatted_spec_extension,
     render_brd_to_markdown,
     render_build_spec_to_markdown,
     render_design_brief_to_markdown,
@@ -163,16 +191,6 @@ def validate_publish_destination(destination: str) -> Path | None:
 
 # ---------- Checkpoint provider helpers ----------
 
-# Maps Pydantic output classes to their artifact_type label, used by the few
-# post-kickoff hooks that need to know which artifact a TaskOutput corresponds to.
-_PYDANTIC_TO_ARTIFACT: dict[type, str] = {
-    ResearchOutput: "research_brief",
-    PRFAQOutput: "prfaq",
-    DesignBriefOutput: "design_brief",
-    BRDOutput: "brd",
-    CodingPromptOutput: "build_spec",
-}
-
 
 def _install_checkpoint_provider(
     handlers: list[ArtifactHandler],
@@ -190,15 +208,6 @@ def _install_checkpoint_provider(
     )
     token = set_provider(provider)
     return provider, token
-
-
-def _prfaq_version_from_output(obj) -> str:
-    """Resolve the version string from a PRFAQOutput's version_history."""
-    return obj.version_history[-1].version if obj.version_history else "1.0"
-
-
-def _brd_version_from_output(obj) -> str:
-    return obj.version_history[-1].version if obj.version_history else "1.0"
 
 
 def _prompt_wireframe_choice(vault_path: str, output_path: str) -> str:
@@ -271,10 +280,6 @@ def _print_wireframe_response(
 # ---------- File output helpers ----------
 
 
-def _slugify(text: str, max_len: int = 50) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in text[:max_len]).strip("_")
-
-
 def _vault_for_inputs(inputs: dict):
     """Return (vault_config, product_slug) with initiative set, or (None, '')."""
     vault_cfg = get_vault_config()
@@ -282,126 +287,6 @@ def _vault_for_inputs(inputs: dict):
         return None, ""
     vault_cfg.initiative = get_initiative(inputs)
     return vault_cfg, get_product_slug(inputs)
-
-
-def _output_dir() -> Path:
-    output_dir = Path(os.getenv("OUTPUT_DIR", "./output"))
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
-
-
-def _archive_dir(output_dir: Path) -> Path:
-    archive = output_dir / "archive"
-    archive.mkdir(parents=True, exist_ok=True)
-    return archive
-
-
-def enforce_retention_policy(output_dir: Path, archive_after_days: int = 30) -> int:
-    """Move files in output_dir older than N days into output_dir/archive/.
-
-    Skips the archive subdirectory itself. Returns the number of files moved.
-    Silent on individual file errors so this never blocks a real run.
-    """
-    import time
-
-    if archive_after_days <= 0 or not output_dir.exists():
-        return 0
-
-    cutoff = time.time() - (archive_after_days * 86400)
-    archive = _archive_dir(output_dir)
-    moved = 0
-    for entry in output_dir.iterdir():
-        if entry.is_dir():
-            continue
-        try:
-            if entry.stat().st_mtime >= cutoff:
-                continue
-            target = archive / entry.name
-            if target.exists():
-                stem, suffix = target.stem, target.suffix
-                target = archive / f"{stem}_{int(entry.stat().st_mtime)}{suffix}"
-            entry.rename(target)
-            moved += 1
-        except Exception as exc:
-            logger.warning("Failed to archive %s: %s", entry.name, exc)
-            continue
-    return moved
-
-
-def _retention_days() -> int:
-    try:
-        return int(os.getenv("OUTPUT_RETENTION_DAYS", "30"))
-    except ValueError:
-        return 30
-
-
-def _append_usage_log(entry: dict, log_path: Path, max_bytes: int = 5 * 1024 * 1024) -> None:
-    """Append one JSON line to the usage log, rotating at max_bytes.
-
-    Size-based rotation keeps a single backup (usage_log.jsonl.1). The log is
-    write-only (nothing reads it back), so rotation never drops history a
-    report needs. Non-blocking: logging must never fail a real run.
-    """
-    import json
-
-    try:
-        if log_path.exists() and log_path.stat().st_size >= max_bytes:
-            backup = log_path.with_name(log_path.name + ".1")
-            if backup.exists():
-                backup.unlink()
-            log_path.rename(backup)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-    except OSError:
-        pass  # Non-blocking; don't fail the command over logging
-
-
-def save_markdown_brief(markdown: str) -> Path:
-    """Write the rendered research brief to OUTPUT_DIR with a timestamped name."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = _output_dir() / f"research_brief_{timestamp}.md"
-    path.write_text(markdown, encoding="utf-8")
-    html_path = path.with_suffix(".html")
-    html_path.write_text(markdown_to_html(markdown, title="Research Brief"), encoding="utf-8")
-    return path
-
-
-def save_prfaq(markdown: str, feature_summary: str, version: str) -> Path:
-    """Write a PRFAQ markdown file with the version-aware filename convention."""
-    slug = _slugify(feature_summary) or "prfaq"
-    path = _output_dir() / f"prfaq_{slug}_v{version}.md"
-    path.write_text(markdown, encoding="utf-8")
-    html_path = path.with_suffix(".html")
-    html_path.write_text(markdown_to_html(markdown, title="PRFAQ"), encoding="utf-8")
-    return path
-
-
-def publish_output(source_file: Path, destination_dir: Path, label: str) -> Path:
-    """Copy an approved file to the publish destination with a timestamped name."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    slug = _slugify(label)
-    dest_path = destination_dir / f"{timestamp}_{slug}{source_file.suffix}"
-    shutil.copy2(source_file, dest_path)
-    return dest_path
-
-
-def save_design_brief(markdown: str, label: str, version: str = "1.0") -> Path:
-    """Write a design brief markdown file to OUTPUT_DIR."""
-    slug = _slugify(label) or "design_brief"
-    path = _output_dir() / f"design_brief_{slug}_v{version}.md"
-    path.write_text(markdown, encoding="utf-8")
-    html_path = path.with_suffix(".html")
-    html_path.write_text(markdown_to_html(markdown, title="Design Brief"), encoding="utf-8")
-    return path
-
-
-def save_brd(markdown: str, label: str, version: str) -> Path:
-    slug = _slugify(label) or "brd"
-    path = _output_dir() / f"brd_{slug}_v{version}.md"
-    path.write_text(markdown, encoding="utf-8")
-    html_path = path.with_suffix(".html")
-    html_path.write_text(markdown_to_html(markdown, title="Business Requirements Document"), encoding="utf-8")
-    return path
 
 
 def resolve_visual_style_guide_path(inputs: dict) -> str:
@@ -427,32 +312,6 @@ def resolve_visual_style_guide_path(inputs: dict) -> str:
     return str(path)
 
 
-def save_build_spec(reference_md: str, formatted: str, label: str, target_tool: str) -> tuple[Path, Path]:
-    """Write the human-readable wrapper and the tool-ready formatted_spec file.
-
-    Returns (reference_path, formatted_spec_path).
-    """
-    slug = _slugify(label) or "build_spec"
-    out = _output_dir()
-    reference_path = out / f"build_spec_{slug}_{target_tool}.md"
-    spec_path = out / f"build_spec_{slug}_{target_tool}_formatted{formatted_spec_extension(target_tool)}"
-    reference_path.write_text(reference_md, encoding="utf-8")
-    spec_path.write_text(formatted, encoding="utf-8")
-    return reference_path, spec_path
-
-
-def save_brd_exports(brd: BRDOutput, label: str) -> None:
-    """Write Jira CSV and Linear markdown exports alongside the BRD."""
-    slug = _slugify(label) or "brd"
-    out = _output_dir()
-    jira_path = out / f"brd_{slug}_jira_import.csv"
-    linear_path = out / f"brd_{slug}_linear_import.md"
-    jira_path.write_text(export_jira_csv(brd), encoding="utf-8")
-    linear_path.write_text(export_linear_markdown(brd), encoding="utf-8")
-    print(f"Jira import CSV: {jira_path}")
-    print(f"Linear import MD: {linear_path}")
-
-
 # ---------- Pydantic extraction ----------
 
 
@@ -470,62 +329,6 @@ def extract_pydantic_output(crew_result, expected_type):
 
 
 # ---------- Frontmatter helpers ----------
-
-FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
-
-
-def read_frontmatter(filepath: Path) -> dict:
-    """Parse YAML frontmatter from a markdown file.
-
-    Returns an empty-defaults dict if no frontmatter is found, so older
-    files written before frontmatter existed still load cleanly.
-    """
-    try:
-        text = filepath.read_text(encoding="utf-8")
-    except Exception:
-        return {"version": "0.0", "slug": "", "type": ""}
-
-    match = FRONTMATTER_RE.match(text)
-    if not match:
-        return {"version": "0.0", "slug": "", "type": ""}
-
-    try:
-        data = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError:
-        return {"version": "0.0", "slug": "", "type": ""}
-
-    data.setdefault("version", "0.0")
-    data.setdefault("slug", "")
-    data.setdefault("type", "")
-    return data
-
-
-def read_current_version(filepath: Path) -> str:
-    """Read version from frontmatter. Defaults to 1.0 if not found."""
-    fm = read_frontmatter(filepath)
-    v = str(fm.get("version", "0.0"))
-    return v if v != "0.0" else "1.0"
-
-
-def bump_version(version: str) -> str:
-    """Increment the minor component of an ``X.Y`` version string.
-
-    Tolerates versions that are not exactly ``major.minor``: a single
-    component (``"2"``) is treated as ``2.0`` and bumped to ``2.1``; extra
-    or non-numeric components (``"1.0.0"``, ``"1.0-beta"``) fall back to
-    bumping the first numeric-looking minor, or to ``<version>.1`` when no
-    numeric minor is present. Never raises on a malformed frontmatter or
-    LLM-emitted version.
-    """
-    parts = str(version).split(".")
-    major = parts[0] if parts and parts[0] else "1"
-    minor_raw = parts[1] if len(parts) > 1 else "0"
-    try:
-        minor = int("".join(c for c in minor_raw if c.isdigit()) or "0")
-    except ValueError:
-        minor = 0
-    return f"{major}.{minor + 1}"
-
 
 # ---------- Subcommand: research ----------
 
@@ -833,200 +636,6 @@ def cmd_revise(args: argparse.Namespace) -> None:
 # ---------- Subcommand: full-pipeline (Agents 1 → 2 → 3) ----------
 
 
-def _extract_agent_usage(result) -> dict[str, dict[str, int]]:
-    """Extract per-agent token usage from a CrewOutput result.
-
-    Uses the aggregate token_usage from CrewAI and attributes it across agents
-    based on which agents were in the crew. Falls back to aggregate if per-agent
-    data is not available.
-    """
-    usage = {}
-    token_usage = getattr(result, "token_usage", None)
-    if token_usage is None:
-        return usage
-
-    prompt = getattr(token_usage, "prompt_tokens", 0)
-    completion = getattr(token_usage, "completion_tokens", 0)
-
-    # If we can't break down per-agent, report the aggregate
-    if prompt == 0 and completion == 0:
-        return usage
-
-    # Map task outputs to agent names based on the Pydantic output type
-    agent_map = {
-        "ResearchOutput": "Research Agent",
-        "PRFAQOutput": "PRFAQ Agent",
-        "DesignBriefOutput": "Design Brief Agent",
-        "BRDOutput": "BRD Agent",
-        "CodingPromptOutput": "BRD Agent",  # build spec runs on the same agent
-        "FeedbackClassification": "Feedback Classifier",  # TD8
-    }
-
-    # Count how many tasks each agent ran
-    agent_task_counts: dict[str, int] = {}
-    if hasattr(result, "tasks_output"):
-        for to in result.tasks_output:
-            if hasattr(to, "pydantic") and to.pydantic is not None:
-                type_name = type(to.pydantic).__name__
-                agent_name = agent_map.get(type_name, "Unknown")
-                agent_task_counts[agent_name] = agent_task_counts.get(agent_name, 0) + 1
-
-    if not agent_task_counts:
-        # Fallback: report aggregate under a single entry
-        usage["Pipeline Total"] = {"input_tokens": prompt, "output_tokens": completion}
-        return usage
-
-    # Distribute tokens proportionally by task count (rough approximation)
-    total_tasks = sum(agent_task_counts.values())
-    for agent_name, count in agent_task_counts.items():
-        fraction = count / total_tasks
-        usage[agent_name] = {
-            "input_tokens": int(prompt * fraction),
-            "output_tokens": int(completion * fraction),
-        }
-
-    return usage
-
-
-def _print_cost_summary(result, checkpoint, output_dir):
-    """Print a cost summary and update checkpoint with token data."""
-    agent_usage = _extract_agent_usage(result)
-    if not agent_usage:
-        return
-
-    # Merge with prior checkpoint usage (for resumed runs)
-    for artifact_name, info in checkpoint.get("artifacts", {}).items():
-        if info.get("tokens_in", 0) > 0 or info.get("tokens_out", 0) > 0:
-            # Prior agent costs already recorded; they'll show in the checkpoint
-            pass
-
-    print("\nPipeline complete.")
-    print(format_cost_summary(agent_usage, _MODEL))
-
-    # Update checkpoint with token data for each artifact
-    for agent_name, usage in agent_usage.items():
-        cost = estimate_cost(_MODEL, usage["input_tokens"], usage["output_tokens"])
-        # Find the matching artifact name
-        artifact_key = {
-            "Research Agent": "research_brief",
-            "PRFAQ Agent": "prfaq",
-            "Design Brief Agent": "design_brief",
-            "BRD Agent": "brd",
-        }.get(agent_name)
-        if artifact_key and artifact_key in checkpoint.get("artifacts", {}):
-            checkpoint["artifacts"][artifact_key]["tokens_in"] = usage["input_tokens"]
-            checkpoint["artifacts"][artifact_key]["tokens_out"] = usage["output_tokens"]
-            checkpoint["artifacts"][artifact_key]["estimated_cost_usd"] = round(cost, 4)
-    save_checkpoint(output_dir, checkpoint)
-
-
-def _print_run_metrics(result, command: str, elapsed_seconds: float, product_slug: str = "") -> None:
-    """Print cost summary and log run metrics to JSONL for any command."""
-    agent_usage = _extract_agent_usage(result)
-    if agent_usage:
-        print(format_cost_summary(agent_usage, _MODEL))
-
-    total_in = sum(u.get("input_tokens", 0) for u in agent_usage.values())
-    total_out = sum(u.get("output_tokens", 0) for u in agent_usage.values())
-    total_cost = estimate_cost(_MODEL, total_in, total_out)
-
-    print(f"Elapsed: {elapsed_seconds:.1f}s")
-
-    # Append to JSONL log
-    log_entry = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "command": command,
-        "model": _MODEL,
-        "input_tokens": total_in,
-        "output_tokens": total_out,
-        "estimated_cost_usd": round(total_cost, 4),
-        "elapsed_seconds": round(elapsed_seconds, 1),
-        "product_slug": product_slug,
-    }
-    _append_usage_log(log_entry, _output_dir() / "usage_log.jsonl")
-
-
-def _record_artifact_from_task_output(
-    task_output,
-    label,
-    slug,
-    output_dir,
-    checkpoint,
-    provider,
-    vault_config=None,
-    product_slug=None,
-):
-    """Update the resume checkpoint from a TaskOutput.
-
-    Normal flow: the VaultCheckpointProvider has already written the artifact to
-    output/ and the vault (handle_feedback fires BEFORE task_callback). In that
-    case we just record the path that the provider wrote.
-
-    Fallback flow: if the provider has no record for this artifact type (e.g. the
-    crew ran without human_input, or a test mocked kickoff past the provider), we
-    write the artifact here so the pipeline still produces files. This keeps the
-    callback safe as a last-resort writer.
-
-    Also handles BRD Jira/Linear exports which the provider does not produce.
-    """
-    if not hasattr(task_output, "pydantic") or task_output.pydantic is None:
-        return None
-
-    obj = task_output.pydantic
-    artifact_type = _PYDANTIC_TO_ARTIFACT.get(type(obj))
-    if artifact_type is None:
-        return None
-
-    record = provider.artifacts.get(artifact_type) if provider else None
-
-    if record is None:
-        # Provider didn't fire — fallback write so the pipeline still produces files.
-        if isinstance(obj, ResearchOutput):
-            md = render_research_to_markdown(obj)
-            path = save_markdown_brief(md)
-            if vault_config and product_slug:
-                write_to_vault(md, "research_brief", product_slug, "1.0", vault_config,
-                               downstream="prfaq")
-        elif isinstance(obj, PRFAQOutput):
-            version = _prfaq_version_from_output(obj)
-            md = render_prfaq_to_markdown(obj, slug=slug)
-            path = save_prfaq(md, label, version)
-            if vault_config and product_slug:
-                write_to_vault(md, "prfaq", product_slug, version, vault_config,
-                               upstream="research_brief", downstream="design_brief")
-        elif isinstance(obj, DesignBriefOutput):
-            md = render_design_brief_to_markdown(obj, slug=slug)
-            path = save_design_brief(md, label, "1.0")
-            if vault_config and product_slug:
-                write_to_vault(md, "design_brief", product_slug, "1.0", vault_config,
-                               upstream="prfaq", downstream="brd")
-        elif isinstance(obj, BRDOutput):
-            version = _brd_version_from_output(obj)
-            md = render_brd_to_markdown(obj, slug=slug)
-            path = save_brd(md, label, version)
-            save_brd_exports(obj, label)
-            if vault_config and product_slug:
-                write_to_vault(md, "brd", product_slug, version, vault_config,
-                               upstream="prfaq", downstream="build_spec")
-        else:
-            return None
-        record_artifact(checkpoint, artifact_type, str(path))
-        save_checkpoint(output_dir, checkpoint)
-        return artifact_type
-
-    # Provider already wrote — record path, add exports where relevant.
-    record_artifact(checkpoint, artifact_type, str(record.output_path))
-    save_checkpoint(output_dir, checkpoint)
-
-    if isinstance(obj, BRDOutput):
-        try:
-            save_brd_exports(obj, label)
-        except Exception as exc:
-            logger.warning("Failed to save BRD exports: %s", exc)
-
-    return artifact_type
-
-
 def cmd_full_pipeline(args: argparse.Namespace) -> None:
     inputs = validate_input(parse_input(args.input_file))
     publish_dir = validate_publish_destination(inputs.get("publish_destination", ""))
@@ -1130,22 +739,8 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
     # stub and RACI matrix to spec.formatted_spec before save and render.
     brd_holder: dict[str, BRDOutput] = {}
 
-    def _make_build_spec_render(original_render_fn):
-        def _render(obj: CodingPromptOutput) -> str:
-            brd_obj = brd_holder.get("brd")
-            if brd_obj is not None:
-                try:
-                    from pm_agent_system.utils.render_build_spec import (
-                        _augment_spec_with_stride_raci,
-                    )
-                    _augment_spec_with_stride_raci(obj, brd_obj)
-                except Exception as exc:
-                    logger.warning("STRIDE and RACI augmentation skipped: %s", exc)
-            return original_render_fn(obj)
-        return _render
-
-    _build_spec_render_fn = _make_build_spec_render(
-        lambda obj: render_build_spec_to_markdown(obj, slug=slug)
+    _build_spec_render_fn = make_build_spec_render(
+        lambda obj: render_build_spec_to_markdown(obj, slug=slug), brd_holder
     )
 
     handlers = [
@@ -1248,29 +843,15 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             crew_inputs["research_path"] = research_file
             crew_inputs["design_brief_path"] = design_file
 
-            def _resume_task_callback(task_output):
-                now = time.monotonic()
-                task_name = (
-                    getattr(task_output, "name", None)
-                    or type(getattr(task_output, "pydantic", None)).__name__
-                    or "unknown"
-                )
-                # Stash the BRDOutput so the build_spec render hook can append
-                # the deterministic STRIDE stub and RACI matrix before save.
-                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
-                    brd_holder["brd"] = task_output.pydantic
-                # Absolute completion time from pipeline start.
-                task_timings[task_name] = now - t0_pipeline
-                _record_artifact_from_task_output(
-                    task_output, label, slug, output_dir, checkpoint, provider,
-                    vault_config=vault_cfg, product_slug=product_slug,
-                )
-
             try:
                 t0_pipeline = time.monotonic()
                 task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
                 crew = PmAgentSystem().brd_from_prfaq_crew()
-                crew.task_callback = _resume_task_callback
+                crew.task_callback = make_pipeline_task_callback(
+                    brd_holder=brd_holder, task_timings=task_timings, t0=t0_pipeline,
+                    label=label, slug=slug, output_dir=output_dir, checkpoint=checkpoint,
+                    provider=provider, vault_cfg=vault_cfg, product_slug=product_slug,
+                )
                 result = crew.kickoff(inputs=crew_inputs)
                 elapsed_pipeline = time.monotonic() - t0_pipeline
             except Exception as e:
@@ -1290,26 +871,6 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
             print(f"Target tool for build spec: {target_tool}")
             print("Human review checkpoints will pause after each agent.\n")
 
-            def _task_callback(task_output):
-                now = time.monotonic()
-                task_name = (
-                    getattr(task_output, "name", None)
-                    or type(getattr(task_output, "pydantic", None)).__name__
-                    or "unknown"
-                )
-                # Stash the BRDOutput so the build_spec render hook can append
-                # the deterministic STRIDE stub and RACI matrix before save.
-                if hasattr(task_output, "pydantic") and isinstance(task_output.pydantic, BRDOutput):
-                    brd_holder["brd"] = task_output.pydantic
-                # Absolute completion time from pipeline start.
-                # Under async execution, tasks complete out of order, so
-                # absolute timestamps let us see overlap vs sequential.
-                task_timings[task_name] = now - t0_pipeline
-                _record_artifact_from_task_output(
-                    task_output, label, slug, output_dir, checkpoint, provider,
-                    vault_config=vault_cfg, product_slug=product_slug,
-                )
-
             try:
                 t0_pipeline = time.monotonic()
                 task_timings: dict[str, float] = {"_last_completion_at": t0_pipeline}
@@ -1318,7 +879,11 @@ def cmd_full_pipeline(args: argparse.Namespace) -> None:
                     skip_design=skip_design,
                     sequential_brd=_resolve_sequential_brd(args),
                 )
-                crew.task_callback = _task_callback
+                crew.task_callback = make_pipeline_task_callback(
+                    brd_holder=brd_holder, task_timings=task_timings, t0=t0_pipeline,
+                    label=label, slug=slug, output_dir=output_dir, checkpoint=checkpoint,
+                    provider=provider, vault_cfg=vault_cfg, product_slug=product_slug,
+                )
                 result = crew.kickoff(inputs=crew_inputs)
                 elapsed_pipeline = time.monotonic() - t0_pipeline
             except Exception as e:
@@ -1549,22 +1114,8 @@ def cmd_brd(args: argparse.Namespace) -> None:
     # stub and RACI matrix to spec.formatted_spec before save and render.
     brd_holder: dict[str, BRDOutput] = {}
 
-    def _make_build_spec_render(original_render_fn):
-        def _render(obj: CodingPromptOutput) -> str:
-            brd_obj = brd_holder.get("brd")
-            if brd_obj is not None:
-                try:
-                    from pm_agent_system.utils.render_build_spec import (
-                        _augment_spec_with_stride_raci,
-                    )
-                    _augment_spec_with_stride_raci(obj, brd_obj)
-                except Exception as exc:
-                    logger.warning("STRIDE and RACI augmentation skipped: %s", exc)
-            return original_render_fn(obj)
-        return _render
-
-    _build_spec_render_fn = _make_build_spec_render(
-        lambda obj: render_build_spec_to_markdown(obj, slug=slug)
+    _build_spec_render_fn = make_build_spec_render(
+        lambda obj: render_build_spec_to_markdown(obj, slug=slug), brd_holder
     )
 
     provider, token = _install_checkpoint_provider(
@@ -2473,231 +2024,6 @@ def cmd_feedback_classify(args: argparse.Namespace) -> None:
     print(f"Total classify time: {total_elapsed:.1f}s")
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pm_agent_system")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    p_research = sub.add_parser("research", help="Run Agent 1 only (research brief)")
-    p_research.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
-    p_research.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
-    p_research.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_research.set_defaults(func=cmd_research)
-
-    p_generate = sub.add_parser(
-        "generate", help="Run Agent 1 then Agent 2 to produce a PRFAQ v1.0"
-    )
-    p_generate.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
-    p_generate.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
-    p_generate.add_argument("--research-path", help="Path to an existing research brief markdown. When set, reuse it and skip Agent 1.")
-    p_generate.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_generate.set_defaults(func=cmd_generate)
-
-    p_revise = sub.add_parser("revise", help="Run Agent 2 only to revise an existing PRFAQ")
-    p_revise.add_argument("--prfaq-path", required=True, help="Path to current PRFAQ markdown")
-    p_revise.add_argument(
-        "--context-path", help="File or folder containing revision context"
-    )
-    p_revise.add_argument(
-        "--context-text", help="Inline revision instructions"
-    )
-    p_revise.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_revise.set_defaults(func=cmd_revise)
-
-    # ----- Agent 4 commands -----
-
-    p_full = sub.add_parser(
-        "full-pipeline",
-        help="Run all agents end-to-end (research → PRFAQ → design brief → BRD → build spec)",
-    )
-    p_full.add_argument("input_file", help="Path to input brief (.md recommended; .yaml/.yml also accepted)")
-    p_full.add_argument("--skip-validation", action="store_true", help="Skip the pre-research challenge questions")
-    p_full.add_argument(
-        "--target-tool",
-        choices=VALID_TARGET_TOOLS,
-        help="Target coding tool for the build spec (defaults to DEFAULT_TARGET_TOOL or kiro)",
-    )
-    p_full.add_argument(
-        "--requirements-path",
-        help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
-    )
-    p_full.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume from the last checkpoint if input hasn't changed",
-    )
-    p_full.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Delete any existing checkpoint and run everything from scratch",
-    )
-    p_full.add_argument(
-        "--skip-design",
-        action="store_true",
-        help="Skip Agent 3 (design brief) and run the three-agent pipeline as before",
-    )
-    p_full.add_argument("--open", action="store_true", help="Open the final HTML artifact in the default browser when done")
-    p_full.add_argument(
-        "--sequential-brd",
-        action="store_true",
-        help="Run the BRD structure/cost/compliance steps sequentially instead of in parallel. Slower but avoids the Bedrock toolResult race. Auto-enabled when LLM_PROVIDER=bedrock.",
-    )
-    p_full.set_defaults(func=cmd_full_pipeline)
-
-    p_brd = sub.add_parser(
-        "brd",
-        help="Run Agent 4 only — generate BRD + build spec from an approved PRFAQ",
-    )
-    p_brd.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
-    p_brd.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
-    p_brd.add_argument("--research-path", help="Optional path to research brief markdown")
-    p_brd.add_argument(
-        "--design-brief-path",
-        help="Optional path to approved design brief markdown (Agent 3 output)",
-    )
-    p_brd.add_argument(
-        "--requirements-path",
-        help="Optional path to customer requirements file (CSV, Excel, Markdown, or Word)",
-    )
-    p_brd.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
-    p_brd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_brd.add_argument(
-        "--sequential-brd",
-        action="store_true",
-        help="Run the BRD structure/cost/compliance steps sequentially instead of in parallel. Slower but avoids the Bedrock toolResult race. Auto-enabled when LLM_PROVIDER=bedrock.",
-    )
-    p_brd.add_argument(
-        "--verify",
-        action="store_true",
-        help="Run the advisory verification gate on the PRFAQ before generating the BRD (style, consistency, sourcing, grounding). Warns; does not hard-block.",
-    )
-    p_brd.set_defaults(func=cmd_brd)
-
-    p_spec = sub.add_parser(
-        "build-spec",
-        help="Run Agent 4 only — regenerate build spec from an approved BRD",
-    )
-    p_spec.add_argument("--brd-path", required=True, help="Path to approved BRD markdown")
-    p_spec.add_argument("--target-tool", choices=VALID_TARGET_TOOLS)
-    p_spec.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_spec.set_defaults(func=cmd_build_spec)
-
-    p_rbrd = sub.add_parser(
-        "revise-brd",
-        help="Run Agent 4 only — revise an existing BRD",
-    )
-    p_rbrd.add_argument("--brd-path", required=True, help="Path to current BRD markdown")
-    p_rbrd.add_argument("--context-path", help="File or folder with revision context")
-    p_rbrd.add_argument("--context-text", help="Inline revision instructions")
-    p_rbrd.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_rbrd.set_defaults(func=cmd_revise_brd)
-
-    # ----- Agent 3 commands -----
-
-    p_wire = sub.add_parser(
-        "wireframes",
-        help="Run Agent 3 only — generate a design brief from an approved PRFAQ",
-    )
-    p_wire.add_argument("input_file", help="Path to original input brief (.md or .yaml/.yml) for context")
-    p_wire.add_argument("--prfaq-path", required=True, help="Path to approved PRFAQ markdown")
-    p_wire.add_argument("--research-path", help="Optional path to research brief markdown")
-    p_wire.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_wire.set_defaults(func=cmd_wireframes)
-
-    p_rwire = sub.add_parser(
-        "revise-wireframes",
-        help="Run Agent 3 only — revise an existing design brief",
-    )
-    p_rwire.add_argument("--design-brief-path", required=True, help="Path to current design brief markdown")
-    p_rwire.add_argument("--context-path", help="File or folder with revision context")
-    p_rwire.add_argument("--context-text", help="Inline revision instructions")
-    p_rwire.add_argument("--open", action="store_true", help="Open the HTML artifact in the default browser when done")
-    p_rwire.set_defaults(func=cmd_revise_wireframes)
-
-    p_clean = sub.add_parser("clean", help="Manage output retention (archive/list/delete)")
-    p_clean.add_argument("--archive", action="store_true", help="Archive files older than retention window")
-    p_clean.add_argument("--delete-archive", action="store_true", help="Permanently delete archived files (with confirmation)")
-    p_clean.add_argument("--list", action="store_true", help="List live and archived output files")
-    p_clean.set_defaults(func=cmd_clean)
-
-    p_diff = sub.add_parser(
-        "diff",
-        help="Compare two document versions section by section",
-        description=(
-            "Compare two document versions section by section. "
-            "Note: Section matching uses exact header text. If you renamed a "
-            "section header between versions, the diff will show it as a "
-            "deletion and addition rather than a modification."
-        ),
-    )
-    p_diff.add_argument("old_path", help="Path to the older version")
-    p_diff.add_argument("new_path", help="Path to the newer version")
-    p_diff.set_defaults(func=cmd_diff)
-
-    # ----- Viewer -----
-
-    p_view = sub.add_parser(
-        "view",
-        help="Open the TUI artifact viewer (requires: uv pip install 'pm-working-backwards-agent[ui]')",
-    )
-    p_view.add_argument(
-        "file", nargs="?", default=None, help="Optional markdown file to open immediately"
-    )
-    p_view.add_argument(
-        "--serve",
-        action="store_true",
-        help="Serve the viewer in a web browser instead of the terminal",
-    )
-    p_view.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Port for --serve mode (default: 8000)",
-    )
-    p_view.set_defaults(func=cmd_view)
-
-    # ----- Feedback inbox (Wave 1: status only; classify/apply land in Wave 2) -----
-
-    p_feedback = sub.add_parser(
-        "feedback",
-        help="Manage the stakeholder feedback inbox (output/feedback/)",
-    )
-    feedback_sub = p_feedback.add_subparsers(dest="feedback_command", required=True)
-
-    p_fb_status = feedback_sub.add_parser(
-        "status",
-        help="Show the feedback inbox dashboard",
-    )
-    p_fb_status.add_argument(
-        "--show",
-        choices=["open", "incorporated", "rejected", "deferred", "all"],
-        default="open",
-        help="Which items to display (default: open)",
-    )
-    p_fb_status.add_argument(
-        "--artifact",
-        choices=["research_brief", "prfaq", "design_brief", "brd", "build_spec"],
-        help="Only show items affecting this artifact",
-    )
-    p_fb_status.set_defaults(func=cmd_feedback_status)
-
-    p_fb_classify = feedback_sub.add_parser(
-        "classify",
-        help="Route each open feedback item to the artifacts it affects",
-    )
-    p_fb_classify.add_argument(
-        "--item",
-        help="Only classify a single feedback item by ID (e.g. fb-2026-04-24-001)",
-    )
-    p_fb_classify.add_argument(
-        "--rerun",
-        action="store_true",
-        help="Reclassify items that already have an 'affects' list populated",
-    )
-    p_fb_classify.set_defaults(func=cmd_feedback_classify)
-
-    return parser
-
-
 # Commands that produce fresh output and may run the retention sweep first.
 # Read commands (brd, build-spec, revise*, wireframes*) resolve a
 # user-supplied path out of output/, so sweeping first can archive the very
@@ -2788,8 +2114,12 @@ def _preflight_check(command: str | None) -> None:
 
 def run():
     """CLI entry point."""
+    # Imported lazily so cli.py (which imports the cmd_* handlers from this
+    # module) never triggers a circular import at load time.
+    from pm_agent_system.cli import build_parser
+
     load_dotenv()
-    parser = _build_parser()
+    parser = build_parser()
     args = parser.parse_args()
     _preflight_check(args.command)
     if args.command in _RETENTION_SWEEP_COMMANDS:

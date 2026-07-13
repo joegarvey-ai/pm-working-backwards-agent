@@ -652,6 +652,69 @@ class PmAgentSystem:
             verbose=True,
         )
 
+    def _build_brd_task_group(
+        self,
+        sequential_brd: bool = False,
+        structure_context: list[Task] | None = None,
+        cost_risk_context: list[Task] | None = None,
+        compliance_context: list[Task] | None = None,
+    ) -> list[Task]:
+        """Build the four split-BRD tasks (structure, cost_risk, compliance, assembly).
+
+        Single definition shared by ``full_pipeline_crew`` and ``split_brd_crew``
+        so the topology cannot silently diverge between them. The two callers
+        differ only in context wiring: in the full pipeline the three siblings
+        take in-memory ``context`` from the upstream research/PRFAQ/design tasks;
+        in the standalone split each sibling reads the PRFAQ and research from
+        disk via FileReaderTool and takes no context, so it can run in parallel.
+
+        Each sibling has a dedicated agent to prevent Bedrock tool-use/tool-result
+        interleaving. ``sequential_brd`` runs the three siblings sequentially
+        (async_execution=False) to eliminate that race entirely; the CLI
+        auto-enables it on Bedrock. Returns
+        ``[structure, cost_risk, compliance, assembly]``.
+        """
+        brd_async = not sequential_brd
+
+        def _ctx(context: list[Task] | None) -> dict:
+            # Omit the ``context`` kwarg entirely when None so the Task keeps
+            # CrewAI's NOT_SPECIFIED default (as split_brd_crew relied on);
+            # passing context=[] would be a different, explicit "no context".
+            return {"context": context} if context is not None else {}
+
+        structure_task = Task(
+            config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
+            output_pydantic=BRDStructureOutput,
+            name="brd_structure_task",
+            agent=self.brd_agent(),
+            async_execution=brd_async,
+            **_ctx(structure_context),
+        )
+        cost_risk_task = Task(
+            config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
+            output_pydantic=BRDCostRiskOutput,
+            name="brd_cost_risk_task",
+            agent=self.brd_cost_risk_agent(),
+            async_execution=brd_async,
+            **_ctx(cost_risk_context),
+        )
+        compliance_task = Task(
+            config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
+            output_pydantic=BRDComplianceOutput,
+            name="brd_compliance_task",
+            agent=self.brd_compliance_agent(),
+            async_execution=brd_async,
+            **_ctx(compliance_context),
+        )
+        assembly_task = Task(
+            config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
+            output_pydantic=BRDOutput,
+            context=[structure_task, cost_risk_task, compliance_task],
+            name="brd_assembly_task",
+            agent=self.brd_assembly_agent(),
+        )
+        return [structure_task, cost_risk_task, compliance_task, assembly_task]
+
     def full_pipeline_crew(
         self,
         skip_validation: bool = False,
@@ -688,45 +751,19 @@ class PmAgentSystem:
                 name="generate_design_brief",
             )
 
-        # Split BRD: structure + cost_risk in parallel, then assembly.
-        # Structure needs research + prfaq (+ optional design) via context.
-        # Cost_risk needs research + prfaq via context (so it can run in
-        # parallel without waiting for structure). Dedicated agents per
-        # task prevent Bedrock tool-use/tool-result interleaving.
+        # Split BRD: structure + cost_risk (+ compliance) in parallel, then
+        # assembly. In the full pipeline the three siblings take in-memory
+        # context from the upstream research/PRFAQ (+ optional design) tasks.
         brd_structure_context = [research, prfaq_task]
         if design_task is not None:
             brd_structure_context.append(design_task)
-        brd_async = not sequential_brd
-        brd_structure_task = Task(
-            config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
-            output_pydantic=BRDStructureOutput,
-            context=brd_structure_context,
-            name="brd_structure_task",
-            agent=self.brd_agent(),
-            async_execution=brd_async,
-        )
-        brd_cost_risk_task = Task(
-            config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
-            output_pydantic=BRDCostRiskOutput,
-            context=[research, prfaq_task],
-            name="brd_cost_risk_task",
-            agent=self.brd_cost_risk_agent(),
-            async_execution=brd_async,
-        )
-        brd_compliance_task = Task(
-            config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
-            output_pydantic=BRDComplianceOutput,
-            context=[research, prfaq_task],
-            name="brd_compliance_task",
-            agent=self.brd_compliance_agent(),
-            async_execution=brd_async,
-        )
-        brd_assembly_task = Task(
-            config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
-            output_pydantic=BRDOutput,
-            context=[brd_structure_task, brd_cost_risk_task, brd_compliance_task],
-            name="brd_assembly_task",
-            agent=self.brd_assembly_agent(),
+        brd_structure_task, brd_cost_risk_task, brd_compliance_task, brd_assembly_task = (
+            self._build_brd_task_group(
+                sequential_brd=sequential_brd,
+                structure_context=brd_structure_context,
+                cost_risk_context=[research, prfaq_task],
+                compliance_context=[research, prfaq_task],
+            )
         )
 
         spec_task = Task(
@@ -799,38 +836,11 @@ class PmAgentSystem:
         Task 3: BRDComplianceOutput (data handling, gates, readiness).
         Task 4: merge all three into final BRDOutput.
         """
-        brd_async = not sequential_brd
-        structure_task = Task(
-            config=self.tasks_config["brd_structure_task"],  # type: ignore[index]
-            output_pydantic=BRDStructureOutput,
-            name="brd_structure_task",
-            agent=self.brd_agent(),
-            async_execution=brd_async,
-        )
-        cost_risk_task = Task(
-            config=self.tasks_config["brd_cost_risk_task"],  # type: ignore[index]
-            output_pydantic=BRDCostRiskOutput,
-            # No context=[structure_task]: cost_risk now reads PRFAQ and
-            # research from disk directly so it can run in parallel.
-            name="brd_cost_risk_task",
-            agent=self.brd_cost_risk_agent(),
-            async_execution=brd_async,
-        )
-        compliance_task = Task(
-            config=self.tasks_config["brd_compliance_task"],  # type: ignore[index]
-            output_pydantic=BRDComplianceOutput,
-            # No context=[...]: compliance reads PRFAQ and research from
-            # disk via FileReaderTool so it can run in parallel.
-            name="brd_compliance_task",
-            agent=self.brd_compliance_agent(),
-            async_execution=brd_async,
-        )
-        assembly_task = Task(
-            config=self.tasks_config["brd_assembly_task"],  # type: ignore[index]
-            output_pydantic=BRDOutput,
-            context=[structure_task, cost_risk_task, compliance_task],
-            name="brd_assembly_task",
-            agent=self.brd_assembly_agent(),
+        # No sibling context: each reads the PRFAQ and research from disk via
+        # FileReaderTool so the three can run in parallel. Shares the task
+        # topology with full_pipeline_crew via _build_brd_task_group.
+        structure_task, cost_risk_task, compliance_task, assembly_task = (
+            self._build_brd_task_group(sequential_brd=sequential_brd)
         )
         return Crew(
             agents=[
