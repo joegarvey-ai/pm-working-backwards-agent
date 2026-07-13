@@ -2201,9 +2201,13 @@ def cmd_seed_taskei(args: argparse.Namespace) -> None:
         print("Aborted. No tasks were created.")
         return
 
-    # Determine the parent: use the provided one, or create an EPIC first.
-    parent_id = parent_arg
-    if not parent_id:
+    # Determine the parent reference. A created EPIC returns a display value
+    # (URL / confirmation text), which is NOT itself a valid parentTask id, so
+    # we derive the parent identifier via extract_task_ref. An explicit
+    # --parent-task is already an id and is used verbatim.
+    parent_display = parent_arg  # what we print
+    parent_ref = parent_arg      # what we send as parentTask
+    if not parent_arg:
         print(f"Creating parent EPIC: {epic_title} ...")
         epic_body = (
             f"Parent epic for functional requirements seeded from BRD "
@@ -2214,8 +2218,9 @@ def cmd_seed_taskei(args: argparse.Namespace) -> None:
             print(f"  Failed to create parent EPIC: {epic_result}")
             print("Aborting: no child tasks created (nothing to parent them under).")
             return
-        parent_id = epic_result
-        print(f"  EPIC created: {parent_id}")
+        parent_display = epic_result
+        parent_ref = write_back.extract_task_ref(epic_result)
+        print(f"  EPIC created: {parent_display}")
 
     created: list[tuple[str, str]] = []
     failed: list[tuple[str, str]] = []
@@ -2227,7 +2232,7 @@ def cmd_seed_taskei(args: argparse.Namespace) -> None:
             room,
             title,
             _fr_task_body(fr),
-            parent_task=parent_id,
+            parent_task=parent_ref,
         )
         if write_back.is_write_error(result):
             failed.append((fr.id, result))
@@ -2237,7 +2242,7 @@ def cmd_seed_taskei(args: argparse.Namespace) -> None:
             print(f"  [ok]   {fr.id}: {result}")
 
     print()
-    print(f"Created {len(created)}/{len(frs)} task(s) under parent {parent_id}.")
+    print(f"Created {len(created)}/{len(frs)} task(s) under parent {parent_display}.")
     if failed:
         print(f"{len(failed)} task(s) failed:")
         for fr_id, err in failed:

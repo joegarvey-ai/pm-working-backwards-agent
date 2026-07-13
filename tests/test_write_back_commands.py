@@ -214,11 +214,14 @@ class TestSeedTaskei:
 
         assert mock_epic.call_count == 1
         assert mock_task.call_count == 3
-        # Every child task nests under the created EPIC.
+        # Every child nests under the EPIC's *identifier* (extracted from the
+        # returned URL), not the full display URL.
         for call in mock_task.call_args_list:
-            assert call.kwargs["parent_task"] == "https://taskei.amazon.dev/tasks/EPIC-1"
+            assert call.kwargs["parent_task"] == "EPIC-1"
         out = capsys.readouterr().out
         assert "Created 3/3" in out
+        # The full EPIC URL is still shown to the user.
+        assert "https://taskei.amazon.dev/tasks/EPIC-1" in out
 
     def test_provided_parent_skips_epic(self, brd_file):
         from pm_agent_system.main import cmd_seed_taskei

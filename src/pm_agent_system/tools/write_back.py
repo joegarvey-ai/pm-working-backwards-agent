@@ -113,6 +113,45 @@ def _extract_url(raw: str, fallback_label: str = "resource") -> str:
     return f"(created {fallback_label}; no URL returned)"
 
 
+# A Taskei short-id (e.g. "T-1234", "EPIC-1") or a UUID — the identifier forms
+# TaskeiCreateTask accepts for parentTask. Used to derive a parent reference
+# from a create response, whose full text/URL is NOT a valid parent id.
+_TASK_ID_RE = re.compile(
+    r"\b([A-Za-z][A-Za-z0-9]*-\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b"
+)
+
+
+def extract_task_ref(create_result: str) -> str:
+    """Derive a Taskei parent identifier from a successful create result.
+
+    ``create_taskei_task`` / ``create_taskei_epic`` return a value suitable for
+    *display* (a URL, or raw confirmation text). That value is NOT a valid
+    ``parentTask`` identifier — Taskei's parentTask wants a task ID, not a
+    document URL or a sentence. This derives the best-available id:
+
+    - If the result is a URL, take its last path segment (the task id in the
+      canonical Taskei URL shape ``.../tasks/<id>``).
+    - Otherwise, return the first task-id-like token (``ABC-123`` or a UUID).
+    - Failing both, return the stripped result unchanged (best effort).
+
+    The exact live response shape is unconfirmed (needs a live smoke test), so
+    this is deliberately tolerant rather than strict.
+    """
+    s = (create_result or "").strip()
+    if not s:
+        return s
+    url_match = _URL_RE.search(s)
+    if url_match:
+        url = url_match.group(0).split("?")[0].split("#")[0].rstrip("/")
+        segment = url.rsplit("/", 1)[-1]
+        if segment:
+            return segment
+    id_match = _TASK_ID_RE.search(s)
+    if id_match:
+        return id_match.group(0)
+    return s
+
+
 # ---------------------------------------------------------------------------
 # Low-level call wrapper (shared by every helper)
 # ---------------------------------------------------------------------------

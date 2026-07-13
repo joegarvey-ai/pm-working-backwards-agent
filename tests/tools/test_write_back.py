@@ -272,3 +272,31 @@ class TestEnvOverride:
     def test_url_extraction_prefers_first_http_url(self):
         raw = "See https://quip-amazon.com/AAA/Doc and https://other.example/x"
         assert write_back._extract_url(raw) == "https://quip-amazon.com/AAA/Doc"
+
+
+class TestExtractTaskRef:
+    """extract_task_ref derives a parentTask *identifier*, not a display URL.
+
+    A created EPIC returns a URL/confirmation for display; that value is not a
+    valid parentTask id. extract_task_ref recovers the id so child tasks nest
+    correctly.
+    """
+
+    def test_url_yields_last_path_segment(self):
+        assert write_back.extract_task_ref("Created: https://taskei.amazon.dev/tasks/EPIC-1") == "EPIC-1"
+
+    def test_url_with_query_and_fragment_stripped(self):
+        assert write_back.extract_task_ref("https://taskei.amazon.dev/tasks/T-42?tab=x#c") == "T-42"
+
+    def test_bare_id_token_recovered(self):
+        assert write_back.extract_task_ref("Created task EPIC-123 successfully") == "EPIC-123"
+
+    def test_uuid_recovered(self):
+        u = "550e8400-e29b-41d4-a716-446655440000"
+        assert write_back.extract_task_ref(f"new task {u} done") == u
+
+    def test_no_id_falls_back_to_stripped_text(self):
+        assert write_back.extract_task_ref("  done  ") == "done"
+
+    def test_empty_stays_empty(self):
+        assert write_back.extract_task_ref("") == ""
