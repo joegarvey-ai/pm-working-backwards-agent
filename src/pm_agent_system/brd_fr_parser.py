@@ -59,14 +59,28 @@ _FR_ENTRY_RE = re.compile(r"^#{3,6}\s*(FR-\d+)\s*[:.\-]?\s*(.*)$")
 _FIELD_RE = re.compile(r"^\*\*(?P<label>[^:*]+):\*\*\s*(?P<value>.*)$")
 # "- bullet" acceptance-criteria lines.
 _BULLET_RE = re.compile(r"^[-*]\s+(.*)$")
+# A fenced-code-block delimiter: ``` or ~~~ (optionally with a language),
+# possibly indented. The renderer emits each FR's code_samples as fenced
+# blocks INSIDE the FR section, so both section-boundary detection and FR-entry
+# detection must ignore lines that fall inside a fence — otherwise a code
+# sample containing a "## ..." line truncates the section (dropping later FRs)
+# or a "### FR-### ..." line fabricates a bogus requirement.
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+
+
+def _fence_delims(text: str) -> str:
+    """Return the leading fence delimiter (``` or ~~~) of a line, else ''."""
+    m = _FENCE_RE.match(text)
+    return m.group(1)[0] if m else ""
 
 
 def _isolate_fr_section(text: str) -> list[str]:
     """Return the lines belonging to the Functional Requirements section.
 
     Starts after the FR section header and stops at the next level-2 heading
-    that is not an FR sub-entry. Returns an empty list if no FR section is
-    present.
+    that is not an FR sub-entry — but only when that heading is OUTSIDE a
+    fenced code block (a code sample line beginning with "## " must not end
+    the section). Returns an empty list if no FR section is present.
     """
     lines = text.splitlines()
     start = None
@@ -78,9 +92,21 @@ def _isolate_fr_section(text: str) -> list[str]:
         return []
 
     collected: list[str] = []
+    fence: str = ""  # the char (` or ~) of the currently-open fence, or ""
     for line in lines[start:]:
-        # A new level-2 section (## 6. Non-Functional Requirements) ends the
-        # FR block. FR entries are level-3 (### FR-001), so they are kept.
+        delim = _fence_delims(line)
+        if fence:
+            # Inside a fence: only a matching delimiter can close it. Never
+            # treat fenced content as a section boundary.
+            collected.append(line)
+            if delim == fence:
+                fence = ""
+            continue
+        if delim:
+            fence = delim
+            collected.append(line)
+            continue
+        # Outside any fence: a new level-2 section ends the FR block.
         if _NEXT_H2_RE.match(line):
             break
         collected.append(line)
@@ -100,10 +126,24 @@ def parse_functional_requirements(text: str) -> list[ParsedFR]:
     frs: list[ParsedFR] = []
     current: ParsedFR | None = None
     in_acceptance = False
+    fence: str = ""  # char of the currently-open code fence, or ""
 
     for raw in section:
         line = raw.rstrip()
         stripped = line.strip()
+
+        # Track fenced code blocks and skip their contents entirely: a code
+        # sample that demonstrates BRD markdown (containing "### FR-### ..."
+        # or "**Rationale:**" lines) must not be parsed as real FR structure.
+        delim = _fence_delims(line)
+        if fence:
+            if delim == fence:
+                fence = ""
+            continue
+        if delim:
+            fence = delim
+            in_acceptance = False
+            continue
 
         entry = _FR_ENTRY_RE.match(stripped)
         if entry:

@@ -16,6 +16,7 @@ from pm_agent_system.brd_fr_parser import (
 )
 from pm_agent_system.models.brd_output import (
     BRDOutput,
+    CodeSample,
     FunctionalRequirement,
     NonFunctionalRequirement,
     Risk,
@@ -106,6 +107,55 @@ class TestRoundTripWithRenderer:
         parsed = parse_functional_requirements(md)
         assert [p.id for p in parsed] == ["FR-001", "FR-002", "FR-003"]
         assert all("NFR" not in p.id for p in parsed)
+
+
+class TestCodeFenceAwareness:
+    """Code samples inside the FR section must not corrupt parsing.
+
+    The renderer emits each FR's code_samples as fenced blocks INSIDE the
+    Functional Requirements section. A naive parser would (a) truncate the
+    section at a '## ' line inside a code sample, dropping later FRs, and
+    (b) treat a '### FR-###' line inside a code sample as a real FR.
+    """
+
+    def test_code_sample_with_h2_line_does_not_drop_later_frs(self):
+        frs = [
+            _fr("FR-001", "publish an artifact",
+                acceptance_criteria=["ac-1"],
+                related_user_stories=["US-001"]),
+            _fr("FR-002", "second requirement"),
+            _fr("FR-003", "third requirement"),
+        ]
+        # Attach a code sample to FR-001 whose body contains a '## ' line.
+        frs[0].code_samples = [
+            CodeSample(description="config", language="yaml", code="## networking section\nfoo: bar")
+        ]
+        md = render_brd_to_markdown(_minimal_brd(frs))
+        parsed = parse_functional_requirements(md)
+        # All three FRs survive despite the '## ' line inside FR-001's sample.
+        assert [p.id for p in parsed] == ["FR-001", "FR-002", "FR-003"]
+        # And FR-001's own acceptance criteria are intact.
+        assert parsed[0].acceptance_criteria == ["ac-1"]
+
+    def test_code_sample_with_fr_line_is_not_a_fabricated_fr(self):
+        frs = [
+            _fr("FR-001", "publish an artifact"),
+            _fr("FR-002", "second requirement"),
+            _fr("FR-003", "third requirement"),
+        ]
+        # A code sample demonstrating BRD markdown, containing a fake FR.
+        frs[0].code_samples = [
+            CodeSample(
+                description="example BRD format",
+                language="markdown",
+                code="### FR-999: a fabricated example\n- bogus criterion",
+            )
+        ]
+        md = render_brd_to_markdown(_minimal_brd(frs))
+        parsed = parse_functional_requirements(md)
+        ids = [p.id for p in parsed]
+        assert "FR-999" not in ids
+        assert ids == ["FR-001", "FR-002", "FR-003"]
 
 
 class TestTolerance:
