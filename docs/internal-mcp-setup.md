@@ -45,6 +45,49 @@ stakeholder availability and scheduling constraints.
 
 **Agents that use it:** `prfaq_agent`, `brd_agent`
 
+### Gated write-back (publish-doc, seed-taskei, ingest-feedback)
+
+Unlike the integrations above — which are *read* tools an agent invokes
+mid-run — the write-back commands **write to outward-facing systems** and are
+invoked by *you*, from the CLI, after you approve an artifact. They are never
+attached to an agent, and each external write requires an explicit `[y/N]`
+confirmation that defaults to No.
+
+**Used by:** the `publish-doc`, `seed-taskei`, and `ingest-feedback` CLI
+commands (no agent).
+
+| Command | Writes to | Binary | Remote tool |
+|---|---|---|---|
+| `publish-doc` | A document store (Quip today; SharePoint later) | `builder-mcp` | `QuipEditor` |
+| `seed-taskei` | Taskei (one task per BRD FR, under a parent EPIC) | `builder-mcp` | `TaskeiCreateTask` |
+| `ingest-feedback` | The **local** `output/feedback/` inbox (reads Slack) | `slack-mcp` | `get_messages` |
+
+Notes:
+
+- **Quip is deprecating.** Amazon is migrating document collaboration to
+  SharePoint / Word-on-cloud. `publish-doc` is built around a pluggable
+  provider registry: Quip is the only provider the builder-mcp toolset exposes
+  today, and a SharePoint provider slots in with no CLI change once its MCP
+  write tool ships. Until then, `publish-doc --target sharepoint` reports that
+  the target is unavailable.
+- **`seed-taskei` needs a room.** There is no sensible default room for an OSS
+  tool, so you must pass `--taskei-room <uuid>` or set `TASKEI_ROOM_ID`. The
+  command refuses to run without one. Use `--dry-run` to print the exact tasks
+  it would create without writing anything.
+- **Remote tool names are overridable.** The remote MCP tool names are the
+  live builder-mcp/slack-mcp names, but each is overridable via an env var
+  (`WRITE_BACK_QUIP_TOOL`, `WRITE_BACK_TASKEI_TOOL`, `SLACK_MCP_MESSAGES_TOOL`,
+  and the `*_MCP_BINARY` names) so a registry that registers them differently
+  can be pointed at without a code change.
+- **Fail-soft.** When the binary is not on PATH or Midway is expired, these
+  commands print a descriptive message and write nothing — they never crash.
+- **Call logging.** All write attempts are logged as JSONL to
+  `output/write_back_calls.log`.
+
+Install is the same as Builder MCP (`slack-mcp` installs the same way via
+`mcp-registry`). No environment variables are required beyond the optional
+`TASKEI_ROOM_ID`.
+
 ### Midway cookie sharing
 
 Midway cookie sharing lets both MCP tools authenticate using a single
