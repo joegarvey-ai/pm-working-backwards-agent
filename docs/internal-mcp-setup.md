@@ -58,27 +58,41 @@ commands (no agent).
 
 | Command | Writes to | Binary | Remote tool |
 |---|---|---|---|
-| `publish-doc` | A document store (Quip today; SharePoint later) | `builder-mcp` | `QuipEditor` |
+| `publish-doc --target quip` | Quip document store | `builder-mcp` | `QuipEditor` |
+| `publish-doc --target sharepoint` | SharePoint document library | `sharepoint-mcp` | `create_document` *(assumed)* |
+| `publish-doc --target pippin` | Pippin artifact (needs `--pippin-project`) | `python-pippin-mcp` | `create_artifact` |
 | `seed-taskei` | Taskei (one task per BRD FR, under a parent EPIC) | `builder-mcp` | `TaskeiCreateTask` |
 | `ingest-feedback` | The **local** `output/feedback/` inbox (reads Slack) | `slack-mcp` | `get_messages` |
 
 Notes:
 
-- **Quip is deprecating.** Amazon is migrating document collaboration to
-  SharePoint / Word-on-cloud. `publish-doc` is built around a pluggable
-  provider registry: Quip is the only provider the builder-mcp toolset exposes
-  today, and a SharePoint provider slots in with no CLI change once its MCP
-  write tool ships. Until then, `publish-doc --target sharepoint` reports that
-  the target is unavailable.
+- **Three publish targets, three binaries.** `publish-doc` routes through a
+  pluggable provider registry, and each provider names the binary it speaks to:
+  - `quip` → `builder-mcp` (Midway auth). Amazon is migrating document
+    collaboration off Quip toward SharePoint / Word-on-cloud.
+  - `sharepoint` → `sharepoint-mcp`, a **separate** binary with **FedAuth
+    cookie** auth (not the builder-mcp Midway path). The binary owns its own
+    auth, so the fail-soft contract is identical; only the binary and auth
+    mechanism differ. ⚠️ The create-document **tool name and arg shape are
+    assumed** — the `sharepoint-mcp` binary would not install on the build host
+    (AIM registry lists it "In development"), so its 12-tool contract is
+    unverified. `create_document` is the default guess; override it with
+    `WRITE_BACK_SHAREPOINT_TOOL` after a live smoke test if it differs.
+  - `pippin` → `python-pippin-mcp`. The `create_artifact(project_id, name,
+    content)` contract is confirmed against the connected Pippin MCP. Pippin has
+    no sensible default project, so `publish-doc --target pippin` **requires**
+    `--pippin-project <id>` (or `PIPPIN_PROJECT_ID`) and refuses without one,
+    exactly like `seed-taskei`'s `--taskei-room`.
 - **`seed-taskei` needs a room.** There is no sensible default room for an OSS
   tool, so you must pass `--taskei-room <uuid>` or set `TASKEI_ROOM_ID`. The
   command refuses to run without one. Use `--dry-run` to print the exact tasks
   it would create without writing anything.
-- **Remote tool names are overridable.** The remote MCP tool names are the
-  live builder-mcp/slack-mcp names, but each is overridable via an env var
-  (`WRITE_BACK_QUIP_TOOL`, `WRITE_BACK_TASKEI_TOOL`, `SLACK_MCP_MESSAGES_TOOL`,
-  and the `*_MCP_BINARY` names) so a registry that registers them differently
-  can be pointed at without a code change.
+- **Remote tool names and binaries are overridable.** The remote MCP tool names
+  default to the live gateway names, but each is overridable via an env var
+  (`WRITE_BACK_QUIP_TOOL`, `WRITE_BACK_TASKEI_TOOL`, `WRITE_BACK_SHAREPOINT_TOOL`,
+  `WRITE_BACK_PIPPIN_TOOL`, `SLACK_MCP_MESSAGES_TOOL`, and the `*_MCP_BINARY`
+  names) so a registry that registers them differently can be pointed at
+  without a code change.
 - **Fail-soft.** When the binary is not on PATH or Midway is expired, these
   commands print a descriptive message and write nothing — they never crash.
 - **Call logging.** All write attempts are logged as JSONL to

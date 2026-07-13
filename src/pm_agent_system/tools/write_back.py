@@ -19,15 +19,21 @@ Design notes:
   with ``"Error"`` and never raises. Callers detect failure via
   ``is_write_error`` rather than exceptions, so a missing binary degrades the
   command to a no-op message instead of a crash.
-- **Pluggable publish providers.** Document publishing routes through a
-  ``PUBLISH_PROVIDERS`` registry keyed by target name. Quip is the only
-  provider currently exposed by the builder-mcp toolset; a SharePoint provider
-  slots in with no CLI or handler change once that MCP tool ships (Quip is
-  being deprecated at Amazon in favour of SharePoint / Word-on-cloud).
+- **Pluggable publish providers, each with its own binary.** Document
+  publishing routes through a ``PUBLISH_PROVIDERS`` registry keyed by target
+  name; every entry carries ``(binary, remote_tool, arg_builder)``. Quip and
+  Taskei speak to the builder-mcp binary (Midway auth); SharePoint speaks to a
+  *separate* ``sharepoint-mcp`` binary (FedAuth cookie auth); Pippin speaks to
+  ``python-pippin-mcp``. The binary owns its own auth in every case, so this
+  module still never touches auth material — it only routes each provider to
+  the right binary.
 - **Env-overridable remote contracts.** The remote MCP tool names are the
-  live builder-mcp names (``QuipEditor``, ``TaskeiCreateTask``) but are
-  overridable via env vars (mirroring ``WB_AI_MCP_TOOL``) so a later live
-  smoke test can correct an arg-shape assumption without a code change.
+  live gateway names (``QuipEditor``, ``TaskeiCreateTask``,
+  ``create_artifact`` for Pippin) but are overridable via env vars (mirroring
+  ``WB_AI_MCP_TOOL``) so a later live smoke test can correct an arg-shape
+  assumption without a code change. The SharePoint create-document tool name
+  is *assumed* (its binary would not install this session) and is likewise
+  env-overridable via ``WRITE_BACK_SHAREPOINT_TOOL``.
 - **JSONL call logging** via ``_mcp_stdio.log_call`` to
   ``output/write_back_calls.log``, same as the read tools.
 """
@@ -47,8 +53,10 @@ logger = logging.getLogger(__name__)
 
 _CALL_LOG_PATH = Path(os.getenv("OUTPUT_DIR", "./output")) / "write_back_calls.log"
 
-# MCP Gateway client binary that exposes the write tools. Same binary as the
-# read tools; overridable for whichever gateway client is installed.
+# MCP Gateway client binary that exposes the builder-mcp write tools (Quip +
+# Taskei). Same binary as the read tools; overridable for whichever gateway
+# client is installed. This is the default binary for _call_write, so Taskei
+# and Quip keep their existing behavior after the per-provider-binary refactor.
 _BINARY_NAME = os.getenv("WRITE_BACK_MCP_BINARY", "builder-mcp").strip() or "builder-mcp"
 
 # Remote builder-mcp tool names. Confirmed against the live builder-mcp
@@ -56,6 +64,25 @@ _BINARY_NAME = os.getenv("WRITE_BACK_MCP_BINARY", "builder-mcp").strip() or "bui
 # under a different name.
 _QUIP_TOOL = os.getenv("WRITE_BACK_QUIP_TOOL", "QuipEditor").strip() or "QuipEditor"
 _TASKEI_TOOL = os.getenv("WRITE_BACK_TASKEI_TOOL", "TaskeiCreateTask").strip() or "TaskeiCreateTask"
+
+# SharePoint is a SEPARATE MCP binary (`sharepoint-mcp`) with FedAuth-cookie
+# auth, not the builder-mcp Midway path. The binary owns its own auth exactly
+# as builder-mcp does, so the fail-soft contract here is unchanged; only the
+# binary differs. The create-document tool name is ASSUMED: the sharepoint-mcp
+# binary would not install on the build host this session (the AIM registry
+# lists it "In development" and toolbox could not resolve it), so its 12-tool
+# contract is unverified. `create_document` is a best-guess default and is
+# env-overridable so a live smoke test can correct it without a code change.
+_SHAREPOINT_BINARY = os.getenv("WRITE_BACK_SHAREPOINT_BINARY", "sharepoint-mcp").strip() or "sharepoint-mcp"
+_SHAREPOINT_TOOL = os.getenv("WRITE_BACK_SHAREPOINT_TOOL", "create_document").strip() or "create_document"
+
+# Pippin (Amazon's canonical PRFAQ/BRD/design-doc platform) via the
+# `python-pippin-mcp` binary. The create-artifact contract is CONFIRMED against
+# the connected python-pippin-mcp server: create_artifact(project_id, name,
+# content, description?) — note there is no `format` argument (content is a
+# plain string). Tool name env-overridable to match the WB-AI idiom.
+_PIPPIN_BINARY = os.getenv("PIPPIN_MCP_BINARY", "python-pippin-mcp").strip() or "python-pippin-mcp"
+_PIPPIN_TOOL = os.getenv("WRITE_BACK_PIPPIN_TOOL", "create_artifact").strip() or "create_artifact"
 
 # Per-call timeout. Doc creation and task creation are single writes, but the
 # gateway can be slow to spin up, so match the WB-AI generous window.
@@ -80,11 +107,11 @@ def is_write_error(result: str) -> bool:
     return result.strip().lower().startswith("error")
 
 
-def _binary_missing_message(context: str) -> str:
+def _binary_missing_message(context: str, binary: str = _BINARY_NAME) -> str:
     return (
-        f"Error: {_BINARY_NAME} binary not found on PATH; cannot {context}. "
+        f"Error: {binary} binary not found on PATH; cannot {context}. "
         f"Install the MCP Gateway client "
-        f"('toolbox install mcp-registry && mcp-registry install {_BINARY_NAME}') "
+        f"('toolbox install mcp-registry && mcp-registry install {binary}') "
         f"and run 'mwinit -f'."
     )
 
@@ -161,22 +188,30 @@ def _call_write(
     *,
     context: str,
     log_details: dict,
+    binary: str = _BINARY_NAME,
 ) -> str:
     """Invoke one write tool, returning its raw text or an ``Error: ...`` string.
+
+    ``binary`` selects the MCP Gateway client to spawn. It defaults to the
+    builder-mcp binary so the Taskei helpers (and any caller not passing it)
+    keep their behavior; the publish providers thread their own binary
+    (SharePoint uses a separate FedAuth binary, Pippin uses python-pippin-mcp).
 
     Fail-soft on every failure mode (missing binary, timeout, transport /
     protocol error), matching the read tools. Never raises.
     """
-    _mcp_stdio.log_call(_CALL_LOG_PATH, "invocation", {"tool": remote_tool, **log_details})
+    _mcp_stdio.log_call(
+        _CALL_LOG_PATH, "invocation", {"tool": remote_tool, "binary": binary, **log_details}
+    )
 
-    if not _mcp_stdio.is_binary_available(_BINARY_NAME):
-        msg = _binary_missing_message(context)
-        _mcp_stdio.log_call(_CALL_LOG_PATH, "binary_missing", {"tool": remote_tool})
+    if not _mcp_stdio.is_binary_available(binary):
+        msg = _binary_missing_message(context, binary)
+        _mcp_stdio.log_call(_CALL_LOG_PATH, "binary_missing", {"tool": remote_tool, "binary": binary})
         return msg
 
     try:
         result = _mcp_stdio.call_stdio_mcp(
-            _BINARY_NAME,
+            binary,
             remote_tool,
             arguments,
             timeout=_WRITE_TIMEOUT,
@@ -188,8 +223,8 @@ def _call_write(
         )
         return result
     except FileNotFoundError as exc:
-        _mcp_stdio.log_call(_CALL_LOG_PATH, "binary_missing", {"tool": remote_tool, "message": str(exc)})
-        return _binary_missing_message(context)
+        _mcp_stdio.log_call(_CALL_LOG_PATH, "binary_missing", {"tool": remote_tool, "binary": binary, "message": str(exc)})
+        return _binary_missing_message(context, binary)
     except asyncio.TimeoutError:
         _mcp_stdio.log_call(_CALL_LOG_PATH, "timeout", {"tool": remote_tool})
         return f"Error: {context} timed out after {_WRITE_TIMEOUT:.0f}s."
@@ -218,22 +253,59 @@ def _quip_publish_args(title: str, markdown: str, folder: str) -> dict:
     return args
 
 
-# Registry: target name -> (remote tool name, argument builder).
+def _sharepoint_publish_args(title: str, markdown: str, folder: str) -> dict:
+    """Build sharepoint-mcp create-document arguments.
+
+    ASSUMED CONTRACT (unit-tested, live smoke test pending): the sharepoint-mcp
+    binary would not install this session, so its exact create-document arg
+    shape is unverified. This maps to the most conventional shape — a title,
+    the markdown content, its format, and a single destination string carrying
+    the SharePoint site/library/folder path (the ``--folder`` argument, kept
+    identical to Quip's shape per the destination-model decision). ``folder``
+    is only sent when non-empty; the SharePoint MCP is expected to fall back to
+    a default library otherwise. Correct any of these keys via a live smoke
+    test — the tool name itself is env-overridable (WRITE_BACK_SHAREPOINT_TOOL)
+    and the arg keys can follow.
+    """
+    args: dict = {"title": title, "content": markdown, "format": "markdown"}
+    if folder:
+        args["destination"] = folder
+    return args
+
+
+def _pippin_publish_args(title: str, markdown: str, folder: str) -> dict:
+    """Build python-pippin-mcp create_artifact arguments.
+
+    CONFIRMED CONTRACT against the connected python-pippin-mcp server:
+    ``create_artifact(project_id, name, content, description?)``. There is no
+    ``format`` argument — ``content`` is a plain string. Pippin has no sensible
+    OSS default project, so ``folder`` carries the required ``project_id``
+    (threaded from ``--pippin-project`` / ``PIPPIN_PROJECT_ID`` by the CLI); an
+    empty value is refused before we ever build args (see ``publish_document``).
+    """
+    return {"project_id": folder, "name": title, "content": markdown}
+
+
+# Registry: target name -> (binary, remote tool name, argument builder).
 #
-# Only 'quip' is currently exposed by the builder-mcp toolset. When Amazon
-# ships a SharePoint / Word-on-cloud MCP write tool, add it here with its own
-# arg builder and it becomes available to `publish-doc --target sharepoint`
-# with no CLI or handler change:
-#
-#     "sharepoint": (
-#         os.getenv("WRITE_BACK_SHAREPOINT_TOOL", "<tool name>"),
-#         _sharepoint_publish_args,
-#     ),
-PUBLISH_PROVIDERS: dict[str, tuple[str, Callable[[str, str, str], dict]]] = {
-    "quip": (_QUIP_TOOL, _quip_publish_args),
+# Each provider names the MCP Gateway client binary it speaks to, because they
+# are not all the same binary: Quip rides the builder-mcp binary (Midway auth),
+# SharePoint rides a separate `sharepoint-mcp` binary (FedAuth cookie), and
+# Pippin rides `python-pippin-mcp`. PUBLISH_TARGETS is derived from the keys so
+# the CLI validation updates automatically.
+PUBLISH_PROVIDERS: dict[str, tuple[str, str, Callable[[str, str, str], dict]]] = {
+    "quip": (_BINARY_NAME, _QUIP_TOOL, _quip_publish_args),
+    "sharepoint": (_SHAREPOINT_BINARY, _SHAREPOINT_TOOL, _sharepoint_publish_args),
+    "pippin": (_PIPPIN_BINARY, _PIPPIN_TOOL, _pippin_publish_args),
 }
 
 PUBLISH_TARGETS = tuple(PUBLISH_PROVIDERS)
+
+# Targets that require a non-empty ``folder`` to carry a mandatory destination
+# with no OSS default. Pippin's create_artifact requires a project_id (there is
+# no sensible default), so publish_document refuses a blank folder for it,
+# exactly as seed-taskei refuses a blank --taskei-room.
+_FOLDER_REQUIRED_TARGETS = {"pippin"}
 
 
 def publish_document(title: str, markdown: str, target: str = "quip", folder: str = "") -> str:
@@ -246,17 +318,20 @@ def publish_document(title: str, markdown: str, target: str = "quip", folder: st
     markdown
         Full markdown body to publish (sent verbatim).
     target
-        Provider key from ``PUBLISH_PROVIDERS`` (currently only ``"quip"``).
+        Provider key from ``PUBLISH_PROVIDERS`` (``"quip"``, ``"sharepoint"``,
+        or ``"pippin"``).
     folder
-        Optional provider-specific destination (Quip: comma-separated
-        folder/user member IDs).
+        Optional provider-specific destination. Quip: comma-separated
+        folder/user member IDs. SharePoint: site/library/folder path.
+        Pippin: the target ``project_id`` — REQUIRED (no OSS default), so a
+        blank value is refused for the Pippin target.
 
     Returns
     -------
     str
         The created document's URL on success, or a string beginning with
-        ``"Error"`` on any failure (unknown target, missing binary, transport
-        error). Never raises.
+        ``"Error"`` on any failure (unknown target, missing destination,
+        missing binary, transport error). Never raises.
     """
     target_clean = (target or "").strip().lower()
     provider = PUBLISH_PROVIDERS.get(target_clean)
@@ -270,14 +345,20 @@ def publish_document(title: str, markdown: str, target: str = "quip", folder: st
         return "Error: a non-empty title is required to publish a document."
     if not (markdown or "").strip():
         return "Error: refusing to publish an empty document."
+    if target_clean in _FOLDER_REQUIRED_TARGETS and not (folder or "").strip():
+        return (
+            f"Error: publishing to {target_clean} requires a project/destination "
+            f"id (--pippin-project or PIPPIN_PROJECT_ID); refusing without one."
+        )
 
-    remote_tool, build_args = provider
+    binary, remote_tool, build_args = provider
     arguments = build_args(title, markdown, folder)
     raw = _call_write(
         remote_tool,
         arguments,
         context=f"publish document to {target_clean}",
         log_details={"target": target_clean, "title": title, "content_chars": len(markdown), "folder": folder},
+        binary=binary,
     )
     if is_write_error(raw):
         return raw

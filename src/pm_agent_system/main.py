@@ -2094,8 +2094,23 @@ def cmd_publish_doc(args: argparse.Namespace) -> None:
             title = line[2:].strip()
             break
 
-    folder = (getattr(args, "folder", "") or "").strip()
-    destination = f"{target}" + (f" (folder/members: {folder})" if folder else " (default location)")
+    # Destination slot (write_back.publish_document's `folder` arg). Quip:
+    # member IDs; SharePoint: site/library/folder path; Pippin: the project_id,
+    # which comes from --pippin-project / PIPPIN_PROJECT_ID and is mandatory
+    # (no OSS default), mirroring seed-taskei's --taskei-room.
+    if target == "pippin":
+        folder = (getattr(args, "pippin_project", "") or os.getenv("PIPPIN_PROJECT_ID", "")).strip()
+        if not folder:
+            print(
+                "Error: publishing to pippin requires a project ID. Pass "
+                "--pippin-project <id> or set PIPPIN_PROJECT_ID. Refusing to "
+                "run without a target project."
+            )
+            sys.exit(1)
+        destination = f"pippin (project: {folder})"
+    else:
+        folder = (getattr(args, "folder", "") or "").strip()
+        destination = f"{target}" + (f" (destination: {folder})" if folder else " (default location)")
 
     print(f"\nAbout to publish to {target.upper()}:")
     print(f"  Source:      {artifact_path}")
