@@ -1,0 +1,274 @@
+"""Unit tests for the gated write-back helpers.
+
+These helpers WRITE to outward-facing systems (Quip, Taskei), so the bar is:
+- the correct remote tool name + argument dict is sent, and
+- every failure mode (missing binary, timeout, transport error) fails soft
+  with an ``"Error: ..."`` string and NEVER raises.
+
+Like the read-tool tests, these patch ``_mcp_stdio.call_stdio_mcp`` and
+``is_binary_available`` rather than touching a live service. No confirmation
+prompt is tested here — the ``input()`` gate lives in the command handlers
+(see test_write_back_commands.py); this module tests the transport wrappers.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+from pm_agent_system.tools import write_back
+
+
+def _patch_binary_present():
+    return patch(
+        "pm_agent_system.tools._mcp_stdio.is_binary_available",
+        return_value=True,
+    )
+
+
+def _patch_call(side_effect):
+    return patch(
+        "pm_agent_system.tools.write_back._mcp_stdio.call_stdio_mcp",
+        side_effect=side_effect,
+    )
+
+
+# ---------------------------------------------------------------------------
+# publish_document
+# ---------------------------------------------------------------------------
+class TestPublishDocument:
+    def test_quip_sends_correct_tool_and_args(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["binary"] = binary
+            captured["tool_name"] = tool_name
+            captured["arguments"] = arguments
+            return "Created: https://quip-amazon.com/AbC123/PRFAQ-Draft"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="PRFAQ Draft",
+                markdown="# Press Release\n\nBody.",
+                target="quip",
+                folder="FOLDER123,USER456",
+            )
+
+        assert captured["tool_name"] == "QuipEditor"
+        assert captured["arguments"]["title"] == "PRFAQ Draft"
+        assert captured["arguments"]["content"] == "# Press Release\n\nBody."
+        assert captured["arguments"]["format"] == "markdown"
+        # No documentId -> create a new doc.
+        assert "documentId" not in captured["arguments"]
+        # --folder maps to memberIds.
+        assert captured["arguments"]["memberIds"] == "FOLDER123,USER456"
+        # The URL is extracted from the free-text response.
+        assert url == "https://quip-amazon.com/AbC123/PRFAQ-Draft"
+
+    def test_folder_omitted_when_blank(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["arguments"] = arguments
+            return "https://quip-amazon.com/x/y"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            write_back.publish_document(title="T", markdown="body", target="quip")
+
+        assert "memberIds" not in captured["arguments"]
+
+    def test_unknown_target_returns_error_without_calling(self):
+        called = {"n": 0}
+
+        def fake_call(*a, **k):
+            called["n"] += 1
+            return "should not happen"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            result = write_back.publish_document(
+                title="T", markdown="body", target="sharepoint"
+            )
+
+        assert write_back.is_write_error(result)
+        assert "unknown publish target" in result.lower()
+        assert called["n"] == 0
+
+    def test_empty_markdown_refused_without_calling(self):
+        called = {"n": 0}
+
+        def fake_call(*a, **k):
+            called["n"] += 1
+            return "x"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            result = write_back.publish_document(title="T", markdown="   ", target="quip")
+
+        assert write_back.is_write_error(result)
+        assert called["n"] == 0
+
+    def test_missing_binary_returns_error_string(self):
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ):
+            result = write_back.publish_document(title="T", markdown="body", target="quip")
+        assert write_back.is_write_error(result)
+        assert "not found on path" in result.lower()
+
+    def test_transport_error_returns_error_string_not_raises(self):
+        with _patch_binary_present(), _patch_call(RuntimeError("stdio boom")):
+            result = write_back.publish_document(title="T", markdown="body", target="quip")
+        assert isinstance(result, str)
+        assert write_back.is_write_error(result)
+
+    def test_timeout_returns_error_string(self):
+        with _patch_binary_present(), _patch_call(asyncio.TimeoutError()):
+            result = write_back.publish_document(title="T", markdown="body", target="quip")
+        assert write_back.is_write_error(result)
+        assert "timed out" in result.lower()
+
+    def test_response_without_url_returns_raw_text(self):
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            return "Document created successfully (id ABC)"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            result = write_back.publish_document(title="T", markdown="body", target="quip")
+        # No URL in the response -> the raw confirmation is surfaced (not an error).
+        assert not write_back.is_write_error(result)
+        assert "Document created successfully" in result
+
+
+# ---------------------------------------------------------------------------
+# create_taskei_task / create_taskei_epic
+# ---------------------------------------------------------------------------
+class TestCreateTaskeiTask:
+    def test_sends_correct_tool_and_required_args(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["tool_name"] = tool_name
+            captured["arguments"] = arguments
+            return "Task created: https://taskei.amazon.dev/tasks/T-999"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.create_taskei_task(
+                room="room-uuid-123",
+                name="FR-001: The system shall foo",
+                description="Rationale...\n\nAcceptance criteria:\n- given/when/then",
+                priority="High",
+                parent_task="EPIC-1",
+            )
+
+        assert captured["tool_name"] == "TaskeiCreateTask"
+        args = captured["arguments"]
+        assert args["roomId"] == "room-uuid-123"
+        assert args["name"] == "FR-001: The system shall foo"
+        assert args["description"].startswith("Rationale")
+        assert args["priority"] == "High"
+        assert args["parentTask"] == "EPIC-1"
+        assert args["type"] == "TASK"
+        assert url == "https://taskei.amazon.dev/tasks/T-999"
+
+    def test_missing_room_refused_without_calling(self):
+        called = {"n": 0}
+
+        def fake_call(*a, **k):
+            called["n"] += 1
+            return "x"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            result = write_back.create_taskei_task(room="", name="T", description="d")
+
+        assert write_back.is_write_error(result)
+        assert "room id is required" in result.lower()
+        assert called["n"] == 0
+
+    def test_bad_priority_omitted(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["arguments"] = arguments
+            return "https://taskei.amazon.dev/tasks/T-1"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            write_back.create_taskei_task(
+                room="r", name="T", description="d", priority="Urgent"
+            )
+
+        assert "priority" not in captured["arguments"]
+
+    def test_epic_uses_epic_type(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["arguments"] = arguments
+            return "https://taskei.amazon.dev/tasks/E-1"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            write_back.create_taskei_epic(room="r", name="BRD Epic", description="d")
+
+        assert captured["arguments"]["type"] == "EPIC"
+
+    def test_missing_binary_returns_error(self):
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ):
+            result = write_back.create_taskei_task(room="r", name="T", description="d")
+        assert write_back.is_write_error(result)
+
+    def test_transport_error_fails_soft(self):
+        with _patch_binary_present(), _patch_call(RuntimeError("boom")):
+            result = write_back.create_taskei_task(room="r", name="T", description="d")
+        assert isinstance(result, str)
+        assert write_back.is_write_error(result)
+
+
+# ---------------------------------------------------------------------------
+# Call logging
+# ---------------------------------------------------------------------------
+class TestCallLogging:
+    def test_logs_invocation_and_response(self, monkeypatch, tmp_path: Path):
+        log_file = tmp_path / "write_back_calls.log"
+        monkeypatch.setattr(write_back, "_CALL_LOG_PATH", log_file)
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            return "https://taskei.amazon.dev/tasks/T-1"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            write_back.create_taskei_task(room="r", name="T", description="d")
+
+        assert log_file.exists()
+        events = [json.loads(line) for line in log_file.read_text().strip().splitlines()]
+        types = [e["event"] for e in events]
+        assert types[0] == "invocation"
+        assert "response" in types
+
+    def test_missing_binary_logged(self, monkeypatch, tmp_path: Path):
+        log_file = tmp_path / "write_back_calls.log"
+        monkeypatch.setattr(write_back, "_CALL_LOG_PATH", log_file)
+
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ):
+            write_back.publish_document(title="T", markdown="body", target="quip")
+
+        events = [json.loads(line) for line in log_file.read_text().strip().splitlines()]
+        types = [e["event"] for e in events]
+        assert "binary_missing" in types
+
+
+# ---------------------------------------------------------------------------
+# Env-overridable remote tool names
+# ---------------------------------------------------------------------------
+class TestEnvOverride:
+    def test_registry_exposes_quip_only(self):
+        assert "quip" in write_back.PUBLISH_PROVIDERS
+        assert set(write_back.PUBLISH_TARGETS) == {"quip"}
+
+    def test_url_extraction_prefers_first_http_url(self):
+        raw = "See https://quip-amazon.com/AAA/Doc and https://other.example/x"
+        assert write_back._extract_url(raw) == "https://quip-amazon.com/AAA/Doc"
