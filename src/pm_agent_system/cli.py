@@ -22,10 +22,13 @@ from pm_agent_system.main import (
     cmd_feedback_status,
     cmd_full_pipeline,
     cmd_generate,
+    cmd_ingest_feedback,
+    cmd_publish_doc,
     cmd_research,
     cmd_revise,
     cmd_revise_brd,
     cmd_revise_wireframes,
+    cmd_seed_taskei,
     cmd_view,
     cmd_wireframes,
 )
@@ -253,5 +256,85 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reclassify items that already have an 'affects' list populated",
     )
     p_fb_classify.set_defaults(func=cmd_feedback_classify)
+
+    # ----- Gated write-back integrations (audit #19) -----
+    # The ONLY commands that write outside output/. Each requires the
+    # builder-mcp / slack-mcp binary + a live Midway session, and each writes
+    # only after an explicit interactive confirmation (default No).
+
+    p_publish = sub.add_parser(
+        "publish-doc",
+        help="Publish an approved artifact markdown to a document store (writes externally; confirms first)",
+        description=(
+            "Publish an approved artifact (PRFAQ/BRD/etc.) markdown file to a "
+            "document store. Shows a preview and requires an explicit "
+            "confirmation before writing. Requires the builder-mcp binary and "
+            "a live Midway session. Quip is the only target currently "
+            "available (Amazon is migrating off Quip; a SharePoint target will "
+            "slot in when its MCP tool ships)."
+        ),
+    )
+    p_publish.add_argument("--artifact-path", required=True, help="Path to the approved artifact markdown to publish")
+    p_publish.add_argument(
+        "--target",
+        default="quip",
+        help="Document store to publish to (default: quip). Currently only 'quip' is available.",
+    )
+    p_publish.add_argument(
+        "--folder",
+        default="",
+        help="Optional destination: for Quip, a comma-separated list of folder/user member IDs.",
+    )
+    p_publish.set_defaults(func=cmd_publish_doc)
+
+    p_seed = sub.add_parser(
+        "seed-taskei",
+        help="Create one Taskei task per BRD functional requirement, under a parent EPIC (writes externally; confirms first)",
+        description=(
+            "Parse the functional requirements from an approved BRD markdown "
+            "file and create one Taskei task per requirement, nested under a "
+            "parent EPIC. Prints the full plan first; --dry-run stops there. "
+            "Requires --taskei-room (or TASKEI_ROOM_ID), the builder-mcp "
+            "binary, and a live Midway session."
+        ),
+    )
+    p_seed.add_argument("--brd-path", required=True, help="Path to the approved BRD markdown")
+    p_seed.add_argument(
+        "--taskei-room",
+        default="",
+        help="Taskei room UUID to create tasks in (required; falls back to TASKEI_ROOM_ID). No default.",
+    )
+    p_seed.add_argument(
+        "--parent-task",
+        default="",
+        help="Optional existing task ID to nest the FR tasks under. When set, no EPIC is created.",
+    )
+    p_seed.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the tasks that would be created without writing anything.",
+    )
+    p_seed.set_defaults(func=cmd_seed_taskei)
+
+    p_ingest = sub.add_parser(
+        "ingest-feedback",
+        help="Ingest stakeholder feedback from Slack into the local feedback inbox",
+        description=(
+            "Pull messages from a Slack channel and write each as a feedback "
+            "item (status=open) into output/feedback/. This writes locally, "
+            "not to an external system. Requires the slack-mcp binary and a "
+            "live Midway session. Run 'feedback classify' afterward to route "
+            "the ingested items."
+        ),
+    )
+    p_ingest.add_argument(
+        "--source",
+        default="slack",
+        choices=["slack"],
+        help="Feedback source (v1: slack only).",
+    )
+    p_ingest.add_argument("--channel", default="", help="Slack channel name or ID to pull messages from")
+    p_ingest.add_argument("--since", default="", help="Optional ISO-8601 start date (e.g. 2026-07-01)")
+    p_ingest.set_defaults(func=cmd_ingest_feedback)
 
     return parser
