@@ -41,6 +41,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -120,6 +121,42 @@ def _binary_missing_message(context: str, binary: str = _BINARY_NAME) -> str:
 # URL / identifier extraction
 # ---------------------------------------------------------------------------
 _URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
+
+
+# Pippin web base. The create_artifact response carries no URL (see
+# _pippin_extract_url), so the addressable artifact URL is constructed from the
+# projectId + designId in the response. Overridable for a different Pippin host.
+_PIPPIN_BASE_URL = os.getenv("PIPPIN_BASE_URL", "https://pippin.sara.amazon.dev").strip().rstrip("/") or "https://pippin.sara.amazon.dev"
+
+
+def _pippin_extract_url(raw: str, project_id: str = "") -> str:
+    """Build the canonical Pippin artifact URL from a create_artifact response.
+
+    CONFIRMED LIVE 2026-07-14: python-pippin-mcp's ``create_artifact`` returns a
+    JSON object (``{"design": {"designId": ..., "projectId": ..., ...}}``) with
+    **no URL field** — so the generic ``_extract_url`` would fall back to
+    dumping the whole JSON blob as the "document URL". The addressable artifact
+    lives at ``{base}/architect/{projectId}?artifact={designId}`` (the URL shape
+    the Pippin MCP server documents), so we parse the ids out and construct it.
+
+    Falls back to ``_extract_url`` when the response is not the expected JSON
+    (e.g. a future server revision that returns a real URL, or an unparseable
+    body), so this never regresses a response that already contains a URL.
+    """
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        return _extract_url(raw, fallback_label="pippin document")
+
+    design = payload.get("design", payload) if isinstance(payload, dict) else {}
+    if not isinstance(design, dict):
+        design = {}
+    design_id = str(design.get("designId", "") or "").strip()
+    proj = str(design.get("projectId", "") or project_id or "").strip()
+    if design_id and proj:
+        return f"{_PIPPIN_BASE_URL}/architect/{proj}?artifact={design_id}"
+    # Parsed, but the ids we need are absent — fall back to generic handling.
+    return _extract_url(raw, fallback_label="pippin document")
 
 
 def _extract_url(raw: str, fallback_label: str = "resource") -> str:
@@ -276,12 +313,16 @@ def _sharepoint_publish_args(title: str, markdown: str, folder: str) -> dict:
 def _pippin_publish_args(title: str, markdown: str, folder: str) -> dict:
     """Build python-pippin-mcp create_artifact arguments.
 
-    CONFIRMED CONTRACT against the connected python-pippin-mcp server:
+    CONFIRMED LIVE 2026-07-14 against python-pippin-mcp:
     ``create_artifact(project_id, name, content, description?)``. There is no
     ``format`` argument — ``content`` is a plain string. Pippin has no sensible
     OSS default project, so ``folder`` carries the required ``project_id``
     (threaded from ``--pippin-project`` / ``PIPPIN_PROJECT_ID`` by the CLI); an
     empty value is refused before we ever build args (see ``publish_document``).
+
+    Response note: the tool returns JSON ``{"design": {"designId", "projectId",
+    "docId", "version", ...}}`` with **no URL** — the addressable URL is built
+    by ``_pippin_extract_url`` from projectId + designId.
     """
     return {"project_id": folder, "name": title, "content": markdown}
 
@@ -362,6 +403,11 @@ def publish_document(title: str, markdown: str, target: str = "quip", folder: st
     )
     if is_write_error(raw):
         return raw
+    # Pippin's create_artifact returns JSON with no URL (confirmed live
+    # 2026-07-14); build the canonical artifact URL from its ids. Other
+    # providers return free-text that carries the URL, handled generically.
+    if target_clean == "pippin":
+        return _pippin_extract_url(raw, project_id=folder)
     return _extract_url(raw, fallback_label=f"{target_clean} document")
 
 
