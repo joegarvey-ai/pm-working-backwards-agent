@@ -194,15 +194,30 @@ Run `uv run pm_agent_system <command> --help` for the full options on any comman
 
 ### Write-back commands (internal Amazon only)
 
-These are the **only commands that write outside `./output/`**. Each requires an internal MCP Gateway client binary (`builder-mcp` / `slack-mcp`) on PATH and a live Midway session (`mwinit -f`), and each publishes to an external system only after an **explicit `[y/N]` confirmation that defaults to No**. They are human actions you run *after* approving an artifact — no agent ever publishes or creates tasks autonomously. When the binary or Midway session is absent, they fail soft with a descriptive message and write nothing, exactly like the read integrations.
+These are the **only commands that write outside `./output/`**. Each requires an internal MCP Gateway client binary (`builder-mcp` / `sharepoint-mcp` / `python-pippin-mcp` / `slack-mcp`) on PATH and a live Midway/FedAuth session (`mwinit -f`), and each publishes to an external system only after an **explicit `[y/N]` confirmation that defaults to No**. They are human actions you run *after* approving an artifact — no agent ever publishes or creates tasks autonomously. When the binary or Midway session is absent, they fail soft with a descriptive message and write nothing, exactly like the read integrations.
 
 | Command | What it does |
 |---|---|
-| `publish-doc --artifact-path <md> [--target quip] [--folder <ids>]` | Publish an approved artifact markdown to a document store. Shows a preview, then confirms before writing, and prints the resulting document URL. `quip` is the only target available today; a SharePoint target will slot in when its MCP tool ships (Amazon is migrating off Quip). |
+| `publish-doc --artifact-path <md> [--target quip\|sharepoint\|pippin] [--folder <dest>] [--pippin-project <id>]` | Publish an approved artifact markdown to a document store. Shows a preview, then confirms before writing, and prints the resulting document URL. `quip` and `sharepoint` take an optional `--folder` destination (Quip member IDs / SharePoint site-library-folder path); `pippin` requires `--pippin-project` (or `PIPPIN_PROJECT_ID`). Amazon is migrating off Quip toward SharePoint; Pippin is the canonical PRFAQ/BRD platform. |
 | `seed-taskei --brd-path <md> --taskei-room <id> [--dry-run] [--parent-task <id>]` | Create one Taskei task per BRD functional requirement, nested under a parent EPIC (or an existing `--parent-task`). Prints the full plan first; `--dry-run` stops there without writing. `--taskei-room` (or `TASKEI_ROOM_ID`) is required — there is no default room. |
 | `ingest-feedback --source slack --channel <id> [--since <date>]` | *(also listed above)* Ingest Slack stakeholder messages into the local feedback inbox. This one writes locally, not to an external system. |
 
 Every BRD generation also produces `brd_*_jira_import.csv` and `brd_*_linear_import.md` files in the output directory, ready to import into Jira or Linear. Column names and field labels are configurable — edit `config/jira_import_schema.yaml` and `config/linear_import_schema.yaml` to match your instance before importing.
+
+### Internal read integrations (optional, Amazon only)
+
+Beyond the write-back commands, several optional **read** tools attach to the agents when their MCP binary is on PATH. Each is gated on binary presence, so the OSS pipeline is unchanged when the binary is absent — no config required. They let the agents ground drafts in internal systems public web search cannot reach:
+
+| Tool | Reads | Attached to |
+|---|---|---|
+| `builder_mcp` | Internal wikis, code, Taskei, Quip, pipelines | Research, BRD |
+| `pippin_read` | Prior PRFAQs/BRDs + reviewer comments from Pippin (read-only) | Research |
+| `quicksight_dashboard` | QuickSight dashboard/analysis data (returns CSV file paths, not inline data) | BRD |
+| `software_catalog` | The SoftwareCatalog knowledge graph (products, services, features, org, costs) | Research, BRD |
+| `working_backwards_ai` / `virtual_pm_critique` | Persona/bar-raiser critique of a PRFAQ draft (two independent lenses) | PRFAQ |
+| `outlook_mcp` | Calendar, email metadata, room booking | PRFAQ, BRD |
+
+These are read-only on the agents. Document *creation* (Pippin, SharePoint, Quip) stays in the human-gated `publish-doc` path above, never on an agent. See [docs/internal-mcp-setup.md](docs/internal-mcp-setup.md) for install, auth, and the binary/tool environment overrides.
 
 ## Configuration
 
@@ -219,7 +234,7 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 | `DEFAULT_TARGET_TOOL` | no | Which coding tool the build spec is formatted for. One of `kiro`, `claude_code`, `cursor`, `lovable`. Defaults to `kiro`. |
 | `AWS_PRICING_REGION` | no | AWS region for pricing lookups. Defaults to `us-east-1`. The AWS Pricing API is public but boto3 may need credentials — see `.env.example`. |
 | `OUTPUT_RETENTION_DAYS` | no | How many days output files live before being archived. Defaults to 30. |
-| `MODEL_ROUTING_ENABLED` | no | Set to `true` to enable tiered model routing (Opus for research/PRFAQ, Haiku for classification). Default: off (all Sonnet). |
+| `MODEL_ROUTING_ENABLED` | no | Set to `true` to enable tiered model routing (Opus for research/PRFAQ, Sonnet for structural tasks, Haiku for classification). Default: off — every agent uses Opus 4.8 (override with `ANTHROPIC_MODEL_ID` / `BEDROCK_MODEL_ID`). |
 | `LLM_PROVIDER` | no | `bedrock` or `anthropic`. Defaults to `anthropic`. Bedrock uses `AWS_BEARER_TOKEN_BEDROCK`. |
 | `AWS_BEARER_TOKEN_BEDROCK` | no | Bedrock API key (bearer token). Required when `LLM_PROVIDER=bedrock`. |
 | `CREW_MAX_RETRIES` | no | Max retries on transient Bedrock errors. Defaults to 5. |
@@ -228,12 +243,14 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 
 Four agents, each with a single job, chained by a CrewAI orchestrator. Agent 4 produces two artifacts (BRD, then build spec) as two sequential tasks within one agent. Agent 3 is optional; pass `--skip-design` to run the pipeline without it.
 
+Optional tools (in italics) attach only when their credential or MCP binary is present; the pipeline runs without them.
+
 | Agent | Job | Tools |
 |---|---|---|
-| 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, competitive intelligence (G2/Capterra/TrustRadius), Dovetail (optional), Obsidian (optional), file readers |
-| 2. PRFAQ | Turn the research brief into a Working Backwards press release and FAQ | Style guide loader |
-| 3. Design Brief + Wireframe | Synthesizes the PRFAQ and research into a design brief: screen inventory, user flows, design principles, competitive UI patterns. Optionally generates visual wireframes (coming soon). | File reader, Obsidian (optional) |
-| 4. BRD + Build Spec | Translate the approved PRFAQ (and design brief, if present) into requirements (BRD) and format them into a coding-agent-ready build spec | Tavily (cost flags, API doc lookups), AWS Pricing API (exact per-unit pricing for cost flags) |
+| 1. Research | Gather evidence from web, customer research, and internal notes | Tavily web search, competitive intelligence (G2/Capterra/TrustRadius), prior-art search, file readers, *Dovetail*, *Obsidian*, *builder_mcp*, *pippin_read*, *software_catalog* |
+| 2. PRFAQ | Turn the research brief into a Working Backwards press release and FAQ | Style guide loader, file reader, *Obsidian*, *outlook_mcp*, *working_backwards_ai* / *virtual_pm_critique* (persona critique) |
+| 3. Design Brief + Wireframe | Synthesizes the PRFAQ and research into a design brief: screen inventory, user flows, design principles, competitive UI patterns. Optionally generates visual wireframes (coming soon). | File reader, *Obsidian* |
+| 4. BRD + Build Spec | Translate the approved PRFAQ (and design brief, if present) into requirements (BRD) and format them into a coding-agent-ready build spec | Tavily (cost flags, API doc lookups), AWS Pricing API, AWS docs, requirements reader, style guide, file reader, *Obsidian*, *builder_mcp*, *outlook_mcp*, *quicksight_dashboard*, *software_catalog* |
 
 The orchestrator lives in `src/pm_agent_system/crew.py`. Agent and task definitions are in `src/pm_agent_system/config/agents.yaml` and `tasks.yaml`. Each agent's outputs are validated against a Pydantic model in `src/pm_agent_system/models/`.
 
@@ -245,7 +262,7 @@ The system includes a harness, evaluation framework, and model routing layer for
 
 ### Model Routing
 
-Set `MODEL_ROUTING_ENABLED=true` in `.env` to automatically route LLM calls to the best model for each task:
+Routing is off by default: every agent runs on Opus 4.8. Set `MODEL_ROUTING_ENABLED=true` in `.env` to automatically route LLM calls to the best model for each task instead:
 
 | Task type | Model | Why |
 |---|---|---|
@@ -302,7 +319,7 @@ uv run python -m pm_agent_system.trace_export tests/recordings/prfaq_baseline.js
 ## Known limitations
 
 - The system has been tested on a small number of product problems. It works well for "we want to build X for Y users" but has not been stress-tested on M&A diligence, pricing strategy, or pure platform engineering problems.
-- Agent 1 only knows what it can find via Tavily, Dovetail, your Obsidian vault, and any files you point it at. It cannot access paywalled research or your internal Slack.
+- In the OSS default, Agent 1 only knows what it can find via Tavily, Dovetail, your Obsidian vault, and any files you point it at — it cannot access paywalled research or internal systems. (Inside Amazon, the optional internal read integrations extend this to wikis, Pippin, QuickSight, and the software catalog; Slack is available only via the separate `ingest-feedback` command, not to Agent 1 directly.)
 - Output quality depends heavily on the input. A vague input gets a vague output. The example in `examples/input.yaml` shows the level of specificity that produces good results.
 - A full pipeline run costs roughly $1-3 in API usage at current Claude pricing. Run `research` first if you want a cheap sanity check before committing.
 - This is research software. It is not enterprise-ready. There is no auth, no multi-tenancy, no audit log.

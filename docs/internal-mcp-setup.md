@@ -45,6 +45,36 @@ stakeholder availability and scheduling constraints.
 
 **Agents that use it:** `prfaq_agent`, `brd_agent`
 
+### Read integrations: Pippin, QuickSight, Software Catalog, Virtual PM
+
+Four additional read tools attach to agents when their MCP binary is on PATH,
+each gated by a binary-presence predicate so the OSS pipeline is unchanged when
+the binary is absent. Like Builder MCP, auth is handled by each binary; no env
+vars are required beyond the optional binary/tool overrides.
+
+| Tool | Binary (env override) | Reads | Attached to |
+|---|---|---|---|
+| `pippin_read` | `python-pippin-mcp` (`PIPPIN_MCP_BINARY`) | Prior PRFAQs/BRDs + reviewer comments from Pippin (read-only) | `external_research_agent` |
+| `quicksight_dashboard` | `quicksight-mcp` (`QUICKSIGHT_MCP_BINARY`) | QuickSight dashboard/analysis data (returns CSV **file paths**, not inline data) | `brd_agent` |
+| `software_catalog` | `software-catalog-mcp` (`SOFTWARE_CATALOG_MCP_BINARY`) | SoftwareCatalog knowledge graph (products/services/features/org/costs) | `external_research_agent`, `brd_agent` |
+| `virtual_pm_critique` | `virtual-pm-mcp` (`VIRTUAL_PM_MCP_BINARY`) | Virtual PM spec review (0-100, 8 personas) — a second critique lens alongside Working Backwards AI | `prfaq_agent` |
+
+Notes:
+
+- **Read-only.** These agents get *read* capability only. Pippin *writes*
+  (create_artifact) stay in the human-gated `publish-doc --target pippin` path,
+  never on an agent.
+- **QuickSight returns file paths.** `quicksight_dashboard` surfaces the CSV
+  path + row count so the agent decides whether to read the file, rather than
+  inlining potentially large CSV content. Auth uses `mwinit -o` (headless
+  browser + Midway SSO).
+- **Assumed contracts, flagged.** The `software-catalog-mcp` and `virtual-pm-mcp`
+  binaries would not install on the build host this session (both "In
+  development" in the AIM registry), so their exact remote tool names / arg
+  shapes are unverified and env-overridable (`SOFTWARE_CATALOG_LOOKUP_TOOL`,
+  `SOFTWARE_CATALOG_CYPHER_TOOL`, `VIRTUAL_PM_MCP_TOOL`). Pippin and QuickSight
+  contracts are confirmed (connected Pippin MCP / registry docs respectively).
+
 ### Gated write-back (publish-doc, seed-taskei, ingest-feedback)
 
 Unlike the integrations above — which are *read* tools an agent invokes
@@ -58,27 +88,41 @@ commands (no agent).
 
 | Command | Writes to | Binary | Remote tool |
 |---|---|---|---|
-| `publish-doc` | A document store (Quip today; SharePoint later) | `builder-mcp` | `QuipEditor` |
+| `publish-doc --target quip` | Quip document store | `builder-mcp` | `QuipEditor` |
+| `publish-doc --target sharepoint` | SharePoint document library | `sharepoint-mcp` | `create_document` *(assumed)* |
+| `publish-doc --target pippin` | Pippin artifact (needs `--pippin-project`) | `python-pippin-mcp` | `create_artifact` |
 | `seed-taskei` | Taskei (one task per BRD FR, under a parent EPIC) | `builder-mcp` | `TaskeiCreateTask` |
 | `ingest-feedback` | The **local** `output/feedback/` inbox (reads Slack) | `slack-mcp` | `get_messages` |
 
 Notes:
 
-- **Quip is deprecating.** Amazon is migrating document collaboration to
-  SharePoint / Word-on-cloud. `publish-doc` is built around a pluggable
-  provider registry: Quip is the only provider the builder-mcp toolset exposes
-  today, and a SharePoint provider slots in with no CLI change once its MCP
-  write tool ships. Until then, `publish-doc --target sharepoint` reports that
-  the target is unavailable.
+- **Three publish targets, three binaries.** `publish-doc` routes through a
+  pluggable provider registry, and each provider names the binary it speaks to:
+  - `quip` → `builder-mcp` (Midway auth). Amazon is migrating document
+    collaboration off Quip toward SharePoint / Word-on-cloud.
+  - `sharepoint` → `sharepoint-mcp`, a **separate** binary with **FedAuth
+    cookie** auth (not the builder-mcp Midway path). The binary owns its own
+    auth, so the fail-soft contract is identical; only the binary and auth
+    mechanism differ. ⚠️ The create-document **tool name and arg shape are
+    assumed** — the `sharepoint-mcp` binary would not install on the build host
+    (AIM registry lists it "In development"), so its 12-tool contract is
+    unverified. `create_document` is the default guess; override it with
+    `WRITE_BACK_SHAREPOINT_TOOL` after a live smoke test if it differs.
+  - `pippin` → `python-pippin-mcp`. The `create_artifact(project_id, name,
+    content)` contract is confirmed against the connected Pippin MCP. Pippin has
+    no sensible default project, so `publish-doc --target pippin` **requires**
+    `--pippin-project <id>` (or `PIPPIN_PROJECT_ID`) and refuses without one,
+    exactly like `seed-taskei`'s `--taskei-room`.
 - **`seed-taskei` needs a room.** There is no sensible default room for an OSS
   tool, so you must pass `--taskei-room <uuid>` or set `TASKEI_ROOM_ID`. The
   command refuses to run without one. Use `--dry-run` to print the exact tasks
   it would create without writing anything.
-- **Remote tool names are overridable.** The remote MCP tool names are the
-  live builder-mcp/slack-mcp names, but each is overridable via an env var
-  (`WRITE_BACK_QUIP_TOOL`, `WRITE_BACK_TASKEI_TOOL`, `SLACK_MCP_MESSAGES_TOOL`,
-  and the `*_MCP_BINARY` names) so a registry that registers them differently
-  can be pointed at without a code change.
+- **Remote tool names and binaries are overridable.** The remote MCP tool names
+  default to the live gateway names, but each is overridable via an env var
+  (`WRITE_BACK_QUIP_TOOL`, `WRITE_BACK_TASKEI_TOOL`, `WRITE_BACK_SHAREPOINT_TOOL`,
+  `WRITE_BACK_PIPPIN_TOOL`, `SLACK_MCP_MESSAGES_TOOL`, and the `*_MCP_BINARY`
+  names) so a registry that registers them differently can be pointed at
+  without a code change.
 - **Fail-soft.** When the binary is not on PATH or Midway is expired, these
   commands print a descriptive message and write nothing — they never crash.
 - **Call logging.** All write attempts are logged as JSONL to

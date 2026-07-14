@@ -31,10 +31,14 @@ from pm_agent_system.tools import (
     ObsidianReadTool,
     ObsidianSearchTool,
     OutlookMCPTool,
+    PippinReadTool,
     PriorArtSearchTool,
+    QuickSightTool,
     RequirementsReaderTool,
+    SoftwareCatalogTool,
     StyleGuideLoaderTool,
     TavilySearchTool,
+    VirtualPMCritiqueTool,
     WorkingBackwardsAICritiqueTool,
 )
 import logging
@@ -152,6 +156,59 @@ def _wb_ai_enabled() -> bool:
     return shutil.which(binary) is not None
 
 
+def _software_catalog_enabled() -> bool:
+    """True when the ``software-catalog-mcp`` binary is on PATH.
+
+    The read tool speaks stdio to the internal SoftwareCatalog knowledge-graph
+    server via an MCP Gateway client binary (default ``software-catalog-mcp``,
+    override with ``SOFTWARE_CATALOG_MCP_BINARY``), which handles Midway auth
+    itself. Absent outside Amazon, so the tool stays unregistered there.
+    """
+    import shutil
+    binary = os.getenv("SOFTWARE_CATALOG_MCP_BINARY", "software-catalog-mcp").strip() or "software-catalog-mcp"
+    return shutil.which(binary) is not None
+
+
+def _quicksight_enabled() -> bool:
+    """True when the ``quicksight-mcp`` binary is on PATH.
+
+    The read tool speaks stdio to the internal QuickSight reader server via an
+    MCP Gateway client binary (default ``quicksight-mcp``, override with
+    ``QUICKSIGHT_MCP_BINARY``), which handles Midway auth itself. Absent outside
+    Amazon, so the tool stays unregistered there.
+    """
+    import shutil
+    binary = os.getenv("QUICKSIGHT_MCP_BINARY", "quicksight-mcp").strip() or "quicksight-mcp"
+    return shutil.which(binary) is not None
+
+
+def _pippin_enabled() -> bool:
+    """True when the ``python-pippin-mcp`` binary is on PATH.
+
+    The read tool speaks stdio to the internal Pippin server via an MCP Gateway
+    client binary (default ``python-pippin-mcp``, override with
+    ``PIPPIN_MCP_BINARY``), which handles Midway auth itself. Absent outside
+    Amazon, so the tool stays unregistered there.
+    """
+    import shutil
+    binary = os.getenv("PIPPIN_MCP_BINARY", "python-pippin-mcp").strip() or "python-pippin-mcp"
+    return shutil.which(binary) is not None
+
+
+def _virtual_pm_enabled() -> bool:
+    """True when the ``virtual-pm-mcp`` binary is on PATH.
+
+    The critique tool speaks stdio to the internal Virtual PM service via an MCP
+    Gateway client binary (default ``virtual-pm-mcp``, override with
+    ``VIRTUAL_PM_MCP_BINARY``), which handles Midway auth itself. A second
+    critique lens alongside Working Backwards AI. Absent outside Amazon, so the
+    tool stays unregistered there.
+    """
+    import shutil
+    binary = os.getenv("VIRTUAL_PM_MCP_BINARY", "virtual-pm-mcp").strip() or "virtual-pm-mcp"
+    return shutil.which(binary) is not None
+
+
 @CrewBase
 class PmAgentSystem:
     """PM Agent System crew.
@@ -181,12 +238,21 @@ class PmAgentSystem:
         _builder = "enabled" if _builder_mcp_enabled() else "disabled"
         _outlook = "enabled" if _outlook_mcp_enabled() else "disabled"
         _wb_ai = "enabled" if _wb_ai_enabled() else "disabled"
+        _software_catalog = "enabled" if _software_catalog_enabled() else "disabled"
+        _quicksight = "enabled" if _quicksight_enabled() else "disabled"
+        _pippin = "enabled" if _pippin_enabled() else "disabled"
+        _virtual_pm = "enabled" if _virtual_pm_enabled() else "disabled"
         logger.info(
             "Optional integrations: builder_mcp=%s, outlook_mcp=%s, "
-            "working_backwards_ai=%s, dovetail=%s",
+            "working_backwards_ai=%s, software_catalog=%s, quicksight=%s, "
+            "pippin=%s, virtual_pm=%s, dovetail=%s",
             _builder,
             _outlook,
             _wb_ai,
+            _software_catalog,
+            _quicksight,
+            _pippin,
+            _virtual_pm,
             _dovetail,
         )
 
@@ -226,6 +292,12 @@ class PmAgentSystem:
         ]
         if _builder_mcp_enabled():
             tools.append(BuilderMCPTool())
+        # Prior-art + technical grounding read tools. Each gated on its binary
+        # so the OSS pipeline is unchanged when the binaries are absent.
+        if _pippin_enabled():
+            tools.append(PippinReadTool())
+        if _software_catalog_enabled():
+            tools.append(SoftwareCatalogTool())
         return Agent(
             config=self.agents_config["external_research_agent"],  # type: ignore[index]
             tools=tools,
@@ -261,6 +333,10 @@ class PmAgentSystem:
             tools.append(OutlookMCPTool())
         if _wb_ai_enabled():
             tools.append(WorkingBackwardsAICritiqueTool())
+        # Second critique lens alongside Working Backwards AI, gated on its
+        # binary so the OSS pipeline is unchanged when absent.
+        if _virtual_pm_enabled():
+            tools.append(VirtualPMCritiqueTool())
         return Agent(
             config=self.agents_config["prfaq_agent"],  # type: ignore[index]
             tools=tools,
@@ -298,6 +374,15 @@ class PmAgentSystem:
             tools.append(BuilderMCPTool())
         if _outlook_mcp_enabled():
             tools.append(OutlookMCPTool())
+        # Grounding read tools: QuickSight for real success-metric numbers,
+        # software-catalog for technical context. brd_agent owns the structure
+        # task (a dedicated async sibling), so attaching read tools here mirrors
+        # the existing BuilderMCPTool attachment and respects async isolation
+        # (each sibling has its own agent). Each gated on its binary.
+        if _quicksight_enabled():
+            tools.append(QuickSightTool())
+        if _software_catalog_enabled():
+            tools.append(SoftwareCatalogTool())
         return Agent(
             config=self.agents_config["brd_agent"],  # type: ignore[index]
             tools=tools,

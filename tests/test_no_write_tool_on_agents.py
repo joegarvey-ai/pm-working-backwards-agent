@@ -65,9 +65,19 @@ def all_mcp_enabled(monkeypatch):
     The write helpers gate on the builder-mcp/slack-mcp binaries, exactly like
     the read tools. Forcing the enable predicates True guarantees that if a
     write tool were (incorrectly) attached behind one of those gates, it would
-    appear in the agent's tool list here.
+    appear in the agent's tool list here. The Part B read integrations are
+    included so their (legitimately agent-attached) read tools are enumerated
+    too — the guard confirms none of them trips a write substring.
     """
-    for pred in ("_builder_mcp_enabled", "_outlook_mcp_enabled", "_wb_ai_enabled"):
+    for pred in (
+        "_builder_mcp_enabled",
+        "_outlook_mcp_enabled",
+        "_wb_ai_enabled",
+        "_software_catalog_enabled",
+        "_quicksight_enabled",
+        "_pippin_enabled",
+        "_virtual_pm_enabled",
+    ):
         monkeypatch.setattr(f"pm_agent_system.crew.{pred}", lambda: True, raising=False)
     monkeypatch.setenv("DOVETAIL_API_TOKEN", "test-token")
 

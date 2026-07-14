@@ -88,7 +88,7 @@ class TestPublishDocument:
 
         with _patch_binary_present(), _patch_call(fake_call):
             result = write_back.publish_document(
-                title="T", markdown="body", target="sharepoint"
+                title="T", markdown="body", target="notarealstore"
             )
 
         assert write_back.is_write_error(result)
@@ -141,6 +141,152 @@ class TestPublishDocument:
 
 
 # ---------------------------------------------------------------------------
+# publish_document — SharePoint provider (separate binary, FedAuth)
+# ---------------------------------------------------------------------------
+class TestPublishSharePoint:
+    def test_sends_sharepoint_binary_tool_and_args(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["binary"] = binary
+            captured["tool_name"] = tool_name
+            captured["arguments"] = arguments
+            return "Created: https://amazon.sharepoint.com/sites/pm/Doc.docx"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="PRFAQ Draft",
+                markdown="# Press Release\n\nBody.",
+                target="sharepoint",
+                folder="sites/pm/Shared Documents/PRFAQs",
+            )
+
+        # The SharePoint provider routes to its OWN binary, not builder-mcp.
+        assert captured["binary"] == write_back._SHAREPOINT_BINARY
+        assert captured["binary"] != write_back._BINARY_NAME
+        assert captured["tool_name"] == write_back._SHAREPOINT_TOOL
+        assert captured["arguments"]["title"] == "PRFAQ Draft"
+        assert captured["arguments"]["content"] == "# Press Release\n\nBody."
+        assert captured["arguments"]["format"] == "markdown"
+        # --folder maps to the SharePoint destination path.
+        assert captured["arguments"]["destination"] == "sites/pm/Shared Documents/PRFAQs"
+        assert url == "https://amazon.sharepoint.com/sites/pm/Doc.docx"
+
+    def test_folder_omitted_when_blank(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["arguments"] = arguments
+            return "https://amazon.sharepoint.com/x/y"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            write_back.publish_document(title="T", markdown="body", target="sharepoint")
+
+        assert "destination" not in captured["arguments"]
+
+    def test_missing_binary_fails_soft(self):
+        # is_binary_available(False) for every binary -> descriptive Error, no raise.
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ):
+            result = write_back.publish_document(title="T", markdown="body", target="sharepoint")
+        assert write_back.is_write_error(result)
+        assert write_back._SHAREPOINT_BINARY in result
+        assert "not found on path" in result.lower()
+
+    def test_transport_error_fails_soft(self):
+        with _patch_binary_present(), _patch_call(RuntimeError("fedauth boom")):
+            result = write_back.publish_document(title="T", markdown="body", target="sharepoint")
+        assert isinstance(result, str)
+        assert write_back.is_write_error(result)
+
+    def test_env_override_tool_name(self, monkeypatch):
+        # The assumed SharePoint tool name is env-overridable; reload picks it up.
+        import importlib
+
+        monkeypatch.setenv("WRITE_BACK_SHAREPOINT_TOOL", "UploadFileToLibrary")
+        reloaded = importlib.reload(write_back)
+        try:
+            captured: dict = {}
+
+            def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+                captured["tool_name"] = tool_name
+                return "https://amazon.sharepoint.com/x/y"
+
+            with patch(
+                "pm_agent_system.tools._mcp_stdio.is_binary_available", return_value=True
+            ), patch(
+                "pm_agent_system.tools.write_back._mcp_stdio.call_stdio_mcp",
+                side_effect=fake_call,
+            ):
+                reloaded.publish_document(title="T", markdown="body", target="sharepoint")
+            assert captured["tool_name"] == "UploadFileToLibrary"
+        finally:
+            monkeypatch.delenv("WRITE_BACK_SHAREPOINT_TOOL", raising=False)
+            importlib.reload(write_back)
+
+
+# ---------------------------------------------------------------------------
+# publish_document — Pippin provider (python-pippin-mcp, project_id required)
+# ---------------------------------------------------------------------------
+class TestPublishPippin:
+    def test_sends_pippin_binary_tool_and_confirmed_args(self):
+        captured: dict = {}
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["binary"] = binary
+            captured["tool_name"] = tool_name
+            captured["arguments"] = arguments
+            return "Created artifact: https://pippin.sara.amazon.dev/architect/proj-1?artifact=art-9"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="Widget PRFAQ",
+                markdown="# Widget\n\nBody.",
+                target="pippin",
+                folder="proj-1",
+            )
+
+        assert captured["binary"] == write_back._PIPPIN_BINARY
+        assert captured["tool_name"] == write_back._PIPPIN_TOOL
+        args = captured["arguments"]
+        # CONFIRMED contract: project_id + name + content, and NO `format` key.
+        assert args["project_id"] == "proj-1"
+        assert args["name"] == "Widget PRFAQ"
+        assert args["content"] == "# Widget\n\nBody."
+        assert "format" not in args
+        assert url.startswith("https://pippin.sara.amazon.dev/")
+
+    def test_missing_project_refused_without_calling(self):
+        called = {"n": 0}
+
+        def fake_call(*a, **k):
+            called["n"] += 1
+            return "should not happen"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            result = write_back.publish_document(
+                title="T", markdown="body", target="pippin", folder=""
+            )
+
+        assert write_back.is_write_error(result)
+        assert "project" in result.lower()
+        assert called["n"] == 0
+
+    def test_missing_binary_fails_soft(self):
+        with patch(
+            "pm_agent_system.tools._mcp_stdio.is_binary_available",
+            return_value=False,
+        ):
+            result = write_back.publish_document(
+                title="T", markdown="body", target="pippin", folder="proj-1"
+            )
+        assert write_back.is_write_error(result)
+        assert write_back._PIPPIN_BINARY in result
+
+
+# ---------------------------------------------------------------------------
 # create_taskei_task / create_taskei_epic
 # ---------------------------------------------------------------------------
 class TestCreateTaskeiTask:
@@ -148,6 +294,7 @@ class TestCreateTaskeiTask:
         captured: dict = {}
 
         def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            captured["binary"] = binary
             captured["tool_name"] = tool_name
             captured["arguments"] = arguments
             return "Task created: https://taskei.amazon.dev/tasks/T-999"
@@ -161,6 +308,9 @@ class TestCreateTaskeiTask:
                 parent_task="EPIC-1",
             )
 
+        # Regression: Taskei stays on the builder-mcp binary after the
+        # per-provider-binary refactor (it does not pass an explicit binary).
+        assert captured["binary"] == write_back._BINARY_NAME
         assert captured["tool_name"] == "TaskeiCreateTask"
         args = captured["arguments"]
         assert args["roomId"] == "room-uuid-123"
@@ -265,9 +415,22 @@ class TestCallLogging:
 # Env-overridable remote tool names
 # ---------------------------------------------------------------------------
 class TestEnvOverride:
-    def test_registry_exposes_quip_only(self):
-        assert "quip" in write_back.PUBLISH_PROVIDERS
-        assert set(write_back.PUBLISH_TARGETS) == {"quip"}
+    def test_registry_exposes_quip_sharepoint_pippin(self):
+        assert set(write_back.PUBLISH_TARGETS) == {"quip", "sharepoint", "pippin"}
+        # Every provider entry is (binary, remote_tool, arg_builder).
+        for target, entry in write_back.PUBLISH_PROVIDERS.items():
+            assert len(entry) == 3, f"{target} entry should be a 3-tuple, got {entry!r}"
+            binary, remote_tool, arg_builder = entry
+            assert isinstance(binary, str) and binary
+            assert isinstance(remote_tool, str) and remote_tool
+            assert callable(arg_builder)
+
+    def test_quip_provider_uses_builder_mcp_binary(self):
+        # Regression: the Quip provider must keep the builder-mcp binary after
+        # the per-provider-binary refactor (its behavior is unchanged).
+        binary, remote_tool, _ = write_back.PUBLISH_PROVIDERS["quip"]
+        assert binary == write_back._BINARY_NAME
+        assert remote_tool == write_back._QUIP_TOOL
 
     def test_url_extraction_prefers_first_http_url(self):
         raw = "See https://quip-amazon.com/AAA/Doc and https://other.example/x"
