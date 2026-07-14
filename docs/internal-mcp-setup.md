@@ -72,8 +72,29 @@ Notes:
   binaries would not install on the build host this session (both "In
   development" in the AIM registry), so their exact remote tool names / arg
   shapes are unverified and env-overridable (`SOFTWARE_CATALOG_LOOKUP_TOOL`,
-  `SOFTWARE_CATALOG_CYPHER_TOOL`, `VIRTUAL_PM_MCP_TOOL`). Pippin and QuickSight
-  contracts are confirmed (connected Pippin MCP / registry docs respectively).
+  `SOFTWARE_CATALOG_CYPHER_TOOL`, `VIRTUAL_PM_MCP_TOOL`).
+
+#### Live verification status (2026-07-14)
+
+| Path | Status | Notes |
+|---|---|---|
+| Pippin read (`list_projects` / `list_artifacts` / `get_artifact` / `get_comments`) | ✅ **verified live** | Exercised against a real project; the tool forwards the server JSON verbatim. |
+| Pippin publish (`create_artifact`) | ✅ **verified live** | Arg shape `{project_id, name, content}` confirmed (no `format`). The response is JSON with **no URL** — the artifact URL is now built from `projectId` + `designId` (see `_pippin_extract_url`; `PIPPIN_BASE_URL` overrides the host). |
+| QuickSight `get_dashboard_data` | contract from registry doc, **not run** | Binary would not install (below). |
+| SharePoint / software-catalog / virtual-pm / WB AI | **assumed, blocked** | Binaries would not install (below). |
+
+**Why the "In development" binaries would not install (diagnosed, not an auth
+issue).** `aim mcp install <id>` delegates to `toolbox install <id>`, which
+searches only the toolbox registries configured on the host
+(`toolbox registry list`). The `sharepoint-mcp`, `quicksight-mcp`,
+`software-catalog-mcp`, `virtual-pm-mcp`, and `wb-ai-mcp` bundles are published
+to registries not on that list, so `toolbox install` returns "Unable to find a
+registry containing these tools" even with a live Midway session. Re-running
+`mwinit` does **not** fix this. To install one, add its registry with
+`toolbox registry add <s3-location>` (get the location from the server's
+BuilderHub page) or wait until it graduates from "In development" into a
+standard registry. `python-pippin-mcp` works because its bundle is materialized
+locally at `~/.aim/bundles/python-pippin-mcp-data/`, not via `toolbox install`.
 
 ### Gated write-back (publish-doc, seed-taskei, ingest-feedback)
 

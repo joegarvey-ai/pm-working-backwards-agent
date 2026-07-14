@@ -258,6 +258,92 @@ class TestPublishPippin:
         assert "format" not in args
         assert url.startswith("https://pippin.sara.amazon.dev/")
 
+    # -- Live-confirmed response shape (2026-07-14) ------------------------
+    # create_artifact returns JSON with NO url field; the addressable URL is
+    # built from projectId + designId. Placeholder ids only (never real ones).
+    _LIVE_CREATE_RESPONSE = (
+        '{"design": {"content": "# x", "createdAt": 1, "createdBy": "someone", '
+        '"designId": "DESIGN123", "docId": "DOC456", "kind": "PROSE", '
+        '"name": "Scratch", "projectId": "PROJ789", "version": 1}}'
+    )
+
+    def test_json_response_yields_canonical_artifact_url(self):
+        """The live create_artifact JSON (no URL field) must resolve to the
+        canonical {base}/architect/{projectId}?artifact={designId} URL, not a
+        dump of the raw JSON blob."""
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            return self._LIVE_CREATE_RESPONSE
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="Scratch", markdown="# x", target="pippin", folder="PROJ789"
+            )
+
+        assert url == "https://pippin.sara.amazon.dev/architect/PROJ789?artifact=DESIGN123"
+        assert not write_back.is_write_error(url)
+        # The raw JSON must NOT leak through as the "URL".
+        assert "{" not in url
+
+    def test_project_id_from_arg_when_absent_in_response(self):
+        """If the response omits projectId, fall back to the --pippin-project
+        arg that was threaded in as `folder`."""
+        resp = '{"design": {"designId": "DESIGN123", "kind": "PROSE"}}'
+
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            return resp
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="Scratch", markdown="# x", target="pippin", folder="PROJ789"
+            )
+        assert url == "https://pippin.sara.amazon.dev/architect/PROJ789?artifact=DESIGN123"
+
+    def test_url_bearing_response_still_works(self):
+        """A future/alternate response that already carries a URL must pass
+        through unchanged (no regression)."""
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            return "Created: https://pippin.sara.amazon.dev/x/y"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="S", markdown="# x", target="pippin", folder="PROJ789"
+            )
+        assert url == "https://pippin.sara.amazon.dev/x/y"
+
+    def test_non_json_response_does_not_crash(self):
+        """A non-JSON body degrades to the generic extractor, never raises."""
+        def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+            return "some unexpected plain text"
+
+        with _patch_binary_present(), _patch_call(fake_call):
+            url = write_back.publish_document(
+                title="S", markdown="# x", target="pippin", folder="PROJ789"
+            )
+        assert isinstance(url, str)
+        assert "some unexpected plain text" in url
+
+    def test_base_url_env_overridable(self, monkeypatch):
+        import importlib
+
+        monkeypatch.setenv("PIPPIN_BASE_URL", "https://pippin.example.internal/")
+        reloaded = importlib.reload(write_back)
+        try:
+            def fake_call(binary, tool_name, arguments, args=(), timeout=120.0):
+                return self._LIVE_CREATE_RESPONSE
+
+            with patch(
+                "pm_agent_system.tools._mcp_stdio.is_binary_available", return_value=True
+            ), patch(
+                "pm_agent_system.tools.write_back._mcp_stdio.call_stdio_mcp", side_effect=fake_call
+            ):
+                url = reloaded.publish_document(
+                    title="S", markdown="# x", target="pippin", folder="PROJ789"
+                )
+            assert url == "https://pippin.example.internal/architect/PROJ789?artifact=DESIGN123"
+        finally:
+            monkeypatch.delenv("PIPPIN_BASE_URL", raising=False)
+            importlib.reload(write_back)
+
     def test_missing_project_refused_without_calling(self):
         called = {"n": 0}
 
