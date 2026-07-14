@@ -307,13 +307,21 @@ def test_prfaq_agent_tools_original_four_when_outlook_unset(monkeypatch):
 
 
 def test_startup_log_names_three_integrations(monkeypatch, caplog):
-    """Requirement 6.4: the startup log line names the three integrations
-    with their enabled/disabled status.
+    """Requirement 6.4: the startup log line names every integration with its
+    enabled/disabled status (extended for the Part B read integrations).
     """
-    # builder/outlook/wb_ai gate on binary presence; dovetail on its token.
-    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
-    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
-    monkeypatch.setattr("pm_agent_system.crew._wb_ai_enabled", lambda: False)
+    # builder/outlook/wb_ai + the read integrations gate on binary presence;
+    # dovetail on its token.
+    for pred in (
+        "_builder_mcp_enabled",
+        "_outlook_mcp_enabled",
+        "_wb_ai_enabled",
+        "_software_catalog_enabled",
+        "_quicksight_enabled",
+        "_pippin_enabled",
+        "_virtual_pm_enabled",
+    ):
+        monkeypatch.setattr(f"pm_agent_system.crew.{pred}", lambda: False)
     monkeypatch.delenv("DOVETAIL_API_TOKEN", raising=False)
 
     with caplog.at_level(logging.INFO, logger="pm_agent_system.crew"):
@@ -335,10 +343,108 @@ def test_startup_log_names_three_integrations(monkeypatch, caplog):
     assert "builder_mcp" in log_line
     assert "outlook_mcp" in log_line
     assert "working_backwards_ai" in log_line
+    assert "software_catalog" in log_line
+    assert "quicksight" in log_line
+    assert "pippin" in log_line
+    assert "virtual_pm" in log_line
     assert "dovetail" in log_line
 
     # With all gates disabled, all should be disabled
     assert "builder_mcp=disabled" in log_line
     assert "outlook_mcp=disabled" in log_line
     assert "working_backwards_ai=disabled" in log_line
+    assert "software_catalog=disabled" in log_line
+    assert "quicksight=disabled" in log_line
+    assert "pippin=disabled" in log_line
+    assert "virtual_pm=disabled" in log_line
     assert "dovetail=disabled" in log_line
+
+
+# ---------------------------------------------------------------------------
+# Part B: conditional attachment for the read integrations
+#   software_catalog + pippin -> external_research_agent
+#   quicksight + software_catalog -> brd_agent
+#   virtual_pm -> prfaq_agent
+# Each is attached iff its _*_enabled() predicate is True; absent otherwise
+# (OSS pipeline unchanged when the binaries are missing).
+# ---------------------------------------------------------------------------
+
+_READ_PREDS = (
+    "_software_catalog_enabled",
+    "_quicksight_enabled",
+    "_pippin_enabled",
+    "_virtual_pm_enabled",
+)
+
+
+def _force_read_preds(monkeypatch, value: bool) -> None:
+    for pred in _READ_PREDS:
+        monkeypatch.setattr(f"pm_agent_system.crew.{pred}", lambda: value)
+
+
+def test_read_tools_attached_when_enabled(monkeypatch):
+    """With every read predicate forced True, each read tool lands on the
+    right agent."""
+    # builder/outlook off to keep the baseline tidy; read preds on.
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._wb_ai_enabled", lambda: False)
+    _force_read_preds(monkeypatch, True)
+
+    system = PmAgentSystem()
+    ext = _tool_class_names(system.external_research_agent())
+    brd = _tool_class_names(system.brd_agent())
+    prfaq = _tool_class_names(system.prfaq_agent())
+
+    # external_research_agent: Pippin-read + software-catalog
+    assert "PippinReadTool" in ext
+    assert "SoftwareCatalogTool" in ext
+    # brd_agent: QuickSight + software-catalog
+    assert "QuickSightTool" in brd
+    assert "SoftwareCatalogTool" in brd
+    # prfaq_agent: virtual-pm critique lens
+    assert "VirtualPMCritiqueTool" in prfaq
+
+
+def test_read_tools_absent_when_disabled(monkeypatch):
+    """With every read predicate forced False, no read tool is attached
+    anywhere (OSS pipeline unchanged)."""
+    _force_read_preds(monkeypatch, False)
+
+    system = PmAgentSystem()
+    for builder in ("external_research_agent", "brd_agent", "prfaq_agent"):
+        names = _tool_class_names(getattr(system, builder)())
+        for absent in (
+            "PippinReadTool",
+            "SoftwareCatalogTool",
+            "QuickSightTool",
+            "VirtualPMCritiqueTool",
+        ):
+            assert absent not in names, f"{absent} should be absent from {builder} when disabled"
+
+
+def test_quicksight_not_on_research_agent(monkeypatch):
+    """QuickSight grounds BRD metrics, so it attaches to brd_agent, not the
+    research agent; Pippin-read attaches to research, not brd."""
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+    _force_read_preds(monkeypatch, True)
+
+    system = PmAgentSystem()
+    ext = _tool_class_names(system.external_research_agent())
+    brd = _tool_class_names(system.brd_agent())
+
+    assert "QuickSightTool" not in ext
+    assert "PippinReadTool" not in brd
+
+
+def test_virtual_pm_only_on_prfaq_agent(monkeypatch):
+    """The virtual-pm critique lens belongs to prfaq_agent only."""
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._outlook_mcp_enabled", lambda: False)
+    monkeypatch.setattr("pm_agent_system.crew._wb_ai_enabled", lambda: False)
+    _force_read_preds(monkeypatch, True)
+
+    system = PmAgentSystem()
+    assert "VirtualPMCritiqueTool" in _tool_class_names(system.prfaq_agent())
+    assert "VirtualPMCritiqueTool" not in _tool_class_names(system.external_research_agent())
+    assert "VirtualPMCritiqueTool" not in _tool_class_names(system.brd_agent())
