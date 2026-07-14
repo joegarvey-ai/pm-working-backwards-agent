@@ -45,6 +45,36 @@ stakeholder availability and scheduling constraints.
 
 **Agents that use it:** `prfaq_agent`, `brd_agent`
 
+### Read integrations: Pippin, QuickSight, Software Catalog, Virtual PM
+
+Four additional read tools attach to agents when their MCP binary is on PATH,
+each gated by a binary-presence predicate so the OSS pipeline is unchanged when
+the binary is absent. Like Builder MCP, auth is handled by each binary; no env
+vars are required beyond the optional binary/tool overrides.
+
+| Tool | Binary (env override) | Reads | Attached to |
+|---|---|---|---|
+| `pippin_read` | `python-pippin-mcp` (`PIPPIN_MCP_BINARY`) | Prior PRFAQs/BRDs + reviewer comments from Pippin (read-only) | `external_research_agent` |
+| `quicksight_dashboard` | `quicksight-mcp` (`QUICKSIGHT_MCP_BINARY`) | QuickSight dashboard/analysis data (returns CSV **file paths**, not inline data) | `brd_agent` |
+| `software_catalog` | `software-catalog-mcp` (`SOFTWARE_CATALOG_MCP_BINARY`) | SoftwareCatalog knowledge graph (products/services/features/org/costs) | `external_research_agent`, `brd_agent` |
+| `virtual_pm_critique` | `virtual-pm-mcp` (`VIRTUAL_PM_MCP_BINARY`) | Virtual PM spec review (0-100, 8 personas) — a second critique lens alongside Working Backwards AI | `prfaq_agent` |
+
+Notes:
+
+- **Read-only.** These agents get *read* capability only. Pippin *writes*
+  (create_artifact) stay in the human-gated `publish-doc --target pippin` path,
+  never on an agent.
+- **QuickSight returns file paths.** `quicksight_dashboard` surfaces the CSV
+  path + row count so the agent decides whether to read the file, rather than
+  inlining potentially large CSV content. Auth uses `mwinit -o` (headless
+  browser + Midway SSO).
+- **Assumed contracts, flagged.** The `software-catalog-mcp` and `virtual-pm-mcp`
+  binaries would not install on the build host this session (both "In
+  development" in the AIM registry), so their exact remote tool names / arg
+  shapes are unverified and env-overridable (`SOFTWARE_CATALOG_LOOKUP_TOOL`,
+  `SOFTWARE_CATALOG_CYPHER_TOOL`, `VIRTUAL_PM_MCP_TOOL`). Pippin and QuickSight
+  contracts are confirmed (connected Pippin MCP / registry docs respectively).
+
 ### Gated write-back (publish-doc, seed-taskei, ingest-feedback)
 
 Unlike the integrations above — which are *read* tools an agent invokes
