@@ -26,6 +26,7 @@ from pm_agent_system.tools import (
     AWSPricingTool,
     BuilderMCPTool,
     CompetitiveIntelTool,
+    DovetailCorpusTool,
     DovetailSearchTool,
     FileReaderTool,
     ObsidianReadTool,
@@ -209,6 +210,19 @@ def _virtual_pm_enabled() -> bool:
     return shutil.which(binary) is not None
 
 
+def _dovetail_corpus_enabled() -> bool:
+    """True when the Dovetail S3 export corpus is configured.
+
+    The corpus tool reads the curated Dovetail-to-S3 export from
+    ``DOVETAIL_S3_BUCKET`` via boto3 (standard credential chain). The only gate
+    at this layer is whether the bucket env var is set; missing credentials are
+    handled fail-soft by the tool itself at call time. Unset outside Amazon (or
+    when the export is not configured), so the tool stays unregistered there.
+    Complementary to the live ``DovetailSearchTool`` (``DOVETAIL_API_TOKEN``).
+    """
+    return bool(os.getenv("DOVETAIL_S3_BUCKET", "").strip())
+
+
 @CrewBase
 class PmAgentSystem:
     """PM Agent System crew.
@@ -235,6 +249,7 @@ class PmAgentSystem:
         # triggers a TypeError in CrewAI 1.14+ because the metaclass
         # changes the class hierarchy.
         _dovetail = "enabled" if os.getenv("DOVETAIL_API_TOKEN", "").strip() else "disabled"
+        _dovetail_corpus = "enabled" if _dovetail_corpus_enabled() else "disabled"
         _builder = "enabled" if _builder_mcp_enabled() else "disabled"
         _outlook = "enabled" if _outlook_mcp_enabled() else "disabled"
         _wb_ai = "enabled" if _wb_ai_enabled() else "disabled"
@@ -245,7 +260,7 @@ class PmAgentSystem:
         logger.info(
             "Optional integrations: builder_mcp=%s, outlook_mcp=%s, "
             "working_backwards_ai=%s, software_catalog=%s, quicksight=%s, "
-            "pippin=%s, virtual_pm=%s, dovetail=%s",
+            "pippin=%s, virtual_pm=%s, dovetail=%s, dovetail_corpus=%s",
             _builder,
             _outlook,
             _wb_ai,
@@ -254,6 +269,7 @@ class PmAgentSystem:
             _pippin,
             _virtual_pm,
             _dovetail,
+            _dovetail_corpus,
         )
 
     # ---------- Agents ----------
@@ -298,6 +314,11 @@ class PmAgentSystem:
             tools.append(PippinReadTool())
         if _software_catalog_enabled():
             tools.append(SoftwareCatalogTool())
+        # Curated Dovetail S3 export corpus (metadata-filtered customer research),
+        # attached when DOVETAIL_S3_BUCKET is set. Complementary to the live
+        # Dovetail tool on customer_evidence_agent.
+        if _dovetail_corpus_enabled():
+            tools.append(DovetailCorpusTool())
         return Agent(
             config=self.agents_config["external_research_agent"],  # type: ignore[index]
             tools=tools,
@@ -307,16 +328,21 @@ class PmAgentSystem:
 
     @agent
     def customer_evidence_agent(self) -> Agent:
-        """Customer evidence research agent (Dovetail only).
+        """Customer evidence research agent (Dovetail).
 
         Isolated from other research agents so that async_execution=True
         does not interleave tool-use/tool-result messages across agents.
+
+        Carries the live Dovetail MCP tool always; the curated Dovetail S3
+        export corpus is attached in addition when DOVETAIL_S3_BUCKET is set
+        (the two are complementary: live/real-time vs curated/metadata-filtered).
         """
+        tools: list = [DovetailSearchTool()]
+        if _dovetail_corpus_enabled():
+            tools.append(DovetailCorpusTool())
         return Agent(
             config=self.agents_config["customer_evidence_agent"],  # type: ignore[index]
-            tools=[
-                DovetailSearchTool(),
-            ],
+            tools=tools,
             llm=_llm(_LARGE_MAX_TOKENS, agent_key="customer_evidence_agent"),
             verbose=True,
         )

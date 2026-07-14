@@ -448,3 +448,48 @@ def test_virtual_pm_only_on_prfaq_agent(monkeypatch):
     assert "VirtualPMCritiqueTool" in _tool_class_names(system.prfaq_agent())
     assert "VirtualPMCritiqueTool" not in _tool_class_names(system.external_research_agent())
     assert "VirtualPMCritiqueTool" not in _tool_class_names(system.brd_agent())
+
+
+# ---------------------------------------------------------------------------
+# Dovetail S3 export corpus tool attachment (gated on DOVETAIL_S3_BUCKET).
+# Complementary to the live DovetailSearchTool; attaches to both the
+# customer-evidence and external-research agents when the bucket is configured.
+# ---------------------------------------------------------------------------
+
+
+def test_dovetail_corpus_attached_when_bucket_set(monkeypatch):
+    monkeypatch.setenv("DOVETAIL_S3_BUCKET", "placeholder-bucket")
+    # Keep other optional integrations off to isolate the assertion.
+    monkeypatch.setattr("pm_agent_system.crew._builder_mcp_enabled", lambda: False)
+
+    system = PmAgentSystem()
+    ce = _tool_class_names(system.customer_evidence_agent())
+    ext = _tool_class_names(system.external_research_agent())
+
+    # Attached to both, alongside (not replacing) the live Dovetail tool.
+    assert "DovetailCorpusTool" in ce
+    assert "DovetailSearchTool" in ce  # live tool still present
+    assert "DovetailCorpusTool" in ext
+
+
+def test_dovetail_corpus_absent_when_bucket_unset(monkeypatch):
+    monkeypatch.delenv("DOVETAIL_S3_BUCKET", raising=False)
+
+    system = PmAgentSystem()
+    ce = _tool_class_names(system.customer_evidence_agent())
+    ext = _tool_class_names(system.external_research_agent())
+
+    assert "DovetailCorpusTool" not in ce
+    assert "DovetailCorpusTool" not in ext
+    # The live Dovetail tool is unaffected by the corpus gate.
+    assert "DovetailSearchTool" in ce
+
+
+def test_startup_log_names_dovetail_corpus(monkeypatch, caplog):
+    monkeypatch.delenv("DOVETAIL_S3_BUCKET", raising=False)
+    with caplog.at_level(logging.INFO, logger="pm_agent_system.crew"):
+        PmAgentSystem()
+    line = next(
+        (r.message for r in caplog.records if "dovetail_corpus" in r.message), ""
+    )
+    assert "dovetail_corpus=disabled" in line

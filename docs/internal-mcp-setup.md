@@ -96,6 +96,46 @@ BuilderHub page) or wait until it graduates from "In development" into a
 standard registry. `python-pippin-mcp` works because its bundle is materialized
 locally at `~/.aim/bundles/python-pippin-mcp-data/`, not via `toolbox install`.
 
+### Dovetail S3 export corpus (`dovetail_corpus`)
+
+A second, complementary Dovetail path. The existing `dovetail_research` tool
+queries the Dovetail **MCP API live** (real-time, keyword; gated on
+`DOVETAIL_API_TOKEN`). `dovetail_corpus` reads the **curated Dovetail→S3
+export** that CAPE maintains: a weekly pipeline exports the research repository
+to an S3 bucket as markdown documents, each with a metadata sidecar, under a
+`data/` prefix. The tool filters on **structured research metadata** before
+fetching any document body — something the live keyword API cannot do.
+
+**Agents that use it:** `customer_evidence_agent`, `external_research_agent`
+(attached alongside the live tool, not replacing it).
+
+**Configuration (no hardcoded values; all env):**
+
+| Var | Default | Purpose |
+|---|---|---|
+| `DOVETAIL_S3_BUCKET` | *(unset → tool disabled)* | The export bucket. Setting it enables the tool. |
+| `DOVETAIL_S3_PREFIX` | `data/` | Key prefix for the export objects. |
+| `DOVETAIL_KB_ID` | *(unset)* | Optional Bedrock Knowledge Base id over the bucket; when set, `search` uses semantic `retrieve` instead of the S3 scan. |
+
+**Auth:** boto3's standard AWS credential chain (same as the AWS Pricing tool).
+No tokens handled by the tool. Missing bucket or absent credentials → the tool
+returns a descriptive string and never crashes; the OSS pipeline is unchanged.
+
+**Actions:** `search` (metadata filters — `research_topic_area`, `product`,
+`research_method`, `participant_type`, `content_type`, `theme`, `research_team`
+— plus optional keyword; filters the small sidecars first, then fetches only
+matching bodies), `list` (catalog with metadata, no bodies), `get` (one
+document body by Dovetail id or S3 key). Read-only (S3 GET/LIST); it never
+writes. The internal `author` field (a raw Dovetail user id) is deliberately
+**not** exposed as an agent-visible filter.
+
+> ⚠️ **Live status:** the S3 path is **unit-tested only** — verified against a
+> mocked S3 client, not a live bucket (the build host had no AWS credentials for
+> the export account). The Bedrock KB branch is a **dormant scaffold**: no KB is
+> provisioned over the bucket yet, so it is mock-tested only and its `retrieve`
+> arg/response shape should be confirmed by a live smoke test before relying on
+> it.
+
 ### Gated write-back (publish-doc, seed-taskei, ingest-feedback)
 
 Unlike the integrations above — which are *read* tools an agent invokes
