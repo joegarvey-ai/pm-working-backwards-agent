@@ -268,22 +268,37 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Publish an approved artifact (PRFAQ/BRD/etc.) markdown file to a "
             "document store. Shows a preview and requires an explicit "
-            "confirmation before writing. Requires the builder-mcp binary and "
-            "a live Midway session. Quip is the only target currently "
-            "available (Amazon is migrating off Quip; a SharePoint target will "
-            "slot in when its MCP tool ships)."
+            "confirmation before writing. Targets: 'quip' and 'pippin' ride the "
+            "builder-mcp / python-pippin-mcp binaries (Midway auth); "
+            "'sharepoint' rides the separate sharepoint-mcp binary (FedAuth "
+            "cookie auth). Each requires its binary on PATH and a live "
+            "Midway/FedAuth session. Amazon is migrating off Quip toward "
+            "SharePoint; Pippin is the canonical PRFAQ/BRD platform and needs "
+            "an explicit --pippin-project."
         ),
     )
     p_publish.add_argument("--artifact-path", required=True, help="Path to the approved artifact markdown to publish")
     p_publish.add_argument(
         "--target",
         default="quip",
-        help="Document store to publish to (default: quip). Currently only 'quip' is available.",
+        help="Document store to publish to (default: quip). One of: quip, sharepoint, pippin.",
     )
     p_publish.add_argument(
         "--folder",
         default="",
-        help="Optional destination: for Quip, a comma-separated list of folder/user member IDs.",
+        help=(
+            "Optional destination. Quip: comma-separated folder/user member IDs. "
+            "SharePoint: site/library/folder path. (Pippin uses --pippin-project "
+            "instead.)"
+        ),
+    )
+    p_publish.add_argument(
+        "--pippin-project",
+        default="",
+        help=(
+            "Pippin project ID to create the artifact in (required for "
+            "--target pippin; falls back to PIPPIN_PROJECT_ID). No default."
+        ),
     )
     p_publish.set_defaults(func=cmd_publish_doc)
 

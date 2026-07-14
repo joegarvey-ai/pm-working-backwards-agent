@@ -85,13 +85,16 @@ def brd_file(tmp_path):
 # publish-doc gate
 # ---------------------------------------------------------------------------
 class TestPublishDocGate:
-    def _ns(self, artifact_file):
-        return argparse.Namespace(
+    def _ns(self, artifact_file, **over):
+        base = dict(
             command="publish-doc",
             artifact_path=str(artifact_file),
             target="quip",
             folder="",
+            pippin_project="",
         )
+        base.update(over)
+        return argparse.Namespace(**base)
 
     def test_no_confirmation_writes_nothing(self, artifact_file, capsys):
         from pm_agent_system.main import cmd_publish_doc
@@ -152,12 +155,141 @@ class TestPublishDocGate:
     def test_unknown_target_exits(self, artifact_file):
         from pm_agent_system.main import cmd_publish_doc
 
-        ns = self._ns(artifact_file)
-        ns.target = "sharepoint"
+        ns = self._ns(artifact_file, target="notarealstore")
         with patch("pm_agent_system.tools.write_back.publish_document") as mock_pub, \
              pytest.raises(SystemExit):
             cmd_publish_doc(ns)
         mock_pub.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# publish-doc gate — SharePoint target (the new provider's safety property)
+# ---------------------------------------------------------------------------
+class TestPublishDocSharePointGate:
+    """The confirmation gate must hold for --target sharepoint exactly as it
+    does for quip: "n"/""/EOF write nothing, "y" writes exactly once."""
+
+    def _ns(self, artifact_file):
+        return argparse.Namespace(
+            command="publish-doc",
+            artifact_path=str(artifact_file),
+            target="sharepoint",
+            folder="sites/pm/Shared Documents",
+            pippin_project="",
+        )
+
+    def test_no_confirmation_writes_nothing(self, artifact_file, capsys):
+        from pm_agent_system.main import cmd_publish_doc
+
+        with patch("pm_agent_system.tools.write_back.publish_document") as mock_pub, \
+             patch("builtins.input", return_value="n"):
+            cmd_publish_doc(self._ns(artifact_file))
+
+        mock_pub.assert_not_called()
+        assert "Aborted" in capsys.readouterr().out
+
+    def test_empty_confirmation_defaults_to_no(self, artifact_file):
+        from pm_agent_system.main import cmd_publish_doc
+
+        with patch("pm_agent_system.tools.write_back.publish_document") as mock_pub, \
+             patch("builtins.input", return_value=""):
+            cmd_publish_doc(self._ns(artifact_file))
+
+        mock_pub.assert_not_called()
+
+    def test_eof_defaults_to_no(self, artifact_file):
+        from pm_agent_system.main import cmd_publish_doc
+
+        with patch("pm_agent_system.tools.write_back.publish_document") as mock_pub, \
+             patch("builtins.input", side_effect=EOFError):
+            cmd_publish_doc(self._ns(artifact_file))
+
+        mock_pub.assert_not_called()
+
+    def test_yes_writes_exactly_once_to_sharepoint(self, artifact_file, capsys):
+        from pm_agent_system.main import cmd_publish_doc
+
+        with patch(
+            "pm_agent_system.tools.write_back.publish_document",
+            return_value="https://amazon.sharepoint.com/sites/pm/Widget.docx",
+        ) as mock_pub, patch("builtins.input", return_value="y"):
+            cmd_publish_doc(self._ns(artifact_file))
+
+        assert mock_pub.call_count == 1
+        _, kwargs = mock_pub.call_args
+        assert kwargs["target"] == "sharepoint"
+        # --folder threads through as the destination.
+        assert kwargs["folder"] == "sites/pm/Shared Documents"
+        assert "https://amazon.sharepoint.com/sites/pm/Widget.docx" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# publish-doc gate — Pippin target (requires a project id; gate still holds)
+# ---------------------------------------------------------------------------
+class TestPublishDocPippinGate:
+    def _ns(self, artifact_file, **over):
+        base = dict(
+            command="publish-doc",
+            artifact_path=str(artifact_file),
+            target="pippin",
+            folder="",
+            pippin_project="proj-42",
+        )
+        base.update(over)
+        return argparse.Namespace(**base)
+
+    def test_missing_project_exits_without_prompting(self, artifact_file):
+        from pm_agent_system.main import cmd_publish_doc
+
+        ns = self._ns(artifact_file, pippin_project="")
+        with patch("pm_agent_system.tools.write_back.publish_document") as mock_pub, \
+             patch("builtins.input") as mock_input, \
+             patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("PIPPIN_PROJECT_ID", None)
+            with pytest.raises(SystemExit):
+                cmd_publish_doc(ns)
+        mock_pub.assert_not_called()
+        mock_input.assert_not_called()
+
+    def test_no_confirmation_writes_nothing(self, artifact_file, capsys):
+        from pm_agent_system.main import cmd_publish_doc
+
+        with patch("pm_agent_system.tools.write_back.publish_document") as mock_pub, \
+             patch("builtins.input", return_value="n"):
+            cmd_publish_doc(self._ns(artifact_file))
+
+        mock_pub.assert_not_called()
+        assert "Aborted" in capsys.readouterr().out
+
+    def test_yes_writes_once_with_project_threaded(self, artifact_file, capsys):
+        from pm_agent_system.main import cmd_publish_doc
+
+        with patch(
+            "pm_agent_system.tools.write_back.publish_document",
+            return_value="https://pippin.sara.amazon.dev/architect/proj-42?artifact=art-1",
+        ) as mock_pub, patch("builtins.input", return_value="y"):
+            cmd_publish_doc(self._ns(artifact_file))
+
+        assert mock_pub.call_count == 1
+        _, kwargs = mock_pub.call_args
+        assert kwargs["target"] == "pippin"
+        # The project id is threaded through the folder slot.
+        assert kwargs["folder"] == "proj-42"
+
+    def test_project_from_env_when_flag_absent(self, artifact_file, monkeypatch):
+        from pm_agent_system.main import cmd_publish_doc
+
+        monkeypatch.setenv("PIPPIN_PROJECT_ID", "env-proj-99")
+        with patch(
+            "pm_agent_system.tools.write_back.publish_document",
+            return_value="https://pippin.sara.amazon.dev/architect/env-proj-99?artifact=a",
+        ) as mock_pub, patch("builtins.input", return_value="y"):
+            cmd_publish_doc(self._ns(artifact_file, pippin_project=""))
+
+        assert mock_pub.call_count == 1
+        _, kwargs = mock_pub.call_args
+        assert kwargs["folder"] == "env-proj-99"
 
 
 # ---------------------------------------------------------------------------
