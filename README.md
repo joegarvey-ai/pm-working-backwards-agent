@@ -206,7 +206,7 @@ Every BRD generation also produces `brd_*_jira_import.csv` and `brd_*_linear_imp
 
 ### Internal read integrations (optional, Amazon only)
 
-Beyond the write-back commands, several optional **read** tools attach to the agents when their MCP binary is on PATH. Each is gated on binary presence, so the OSS pipeline is unchanged when the binary is absent — no config required. They let the agents ground drafts in internal systems public web search cannot reach:
+Beyond the write-back commands, several optional **read** tools attach to the agents when their MCP binary is on PATH (or, for the Dovetail S3 corpus, when its bucket env var is set). Each is gated so the OSS pipeline is unchanged when the dependency is absent — no config required by default. They let the agents ground drafts in internal systems public web search cannot reach:
 
 | Tool | Reads | Attached to |
 |---|---|---|
@@ -216,8 +216,11 @@ Beyond the write-back commands, several optional **read** tools attach to the ag
 | `software_catalog` | The SoftwareCatalog knowledge graph (products, services, features, org, costs) | Research, BRD |
 | `working_backwards_ai` / `virtual_pm_critique` | Persona/bar-raiser critique of a PRFAQ draft (two independent lenses) | PRFAQ |
 | `outlook_mcp` | Calendar, email metadata, room booking | PRFAQ, BRD |
+| `dovetail_corpus` | The curated Dovetail→S3 research export — filter by research metadata (topic area, method, participant type, ...), then fetch bodies | Research (customer-evidence + external) |
 
-These are read-only on the agents. Document *creation* (Pippin, SharePoint, Quip) stays in the human-gated `publish-doc` path above, never on an agent. See [docs/internal-mcp-setup.md](docs/internal-mcp-setup.md) for install, auth, and the binary/tool environment overrides.
+These are read-only on the agents. Document *creation* (Pippin, SharePoint, Quip) stays in the human-gated `publish-doc` path above, never on an agent. See [docs/internal-mcp-setup.md](docs/internal-mcp-setup.md) for install, auth, and the environment overrides.
+
+**Two Dovetail paths.** `dovetail_research` queries the Dovetail MCP API live (real-time, keyword; gated on `DOVETAIL_API_TOKEN`). `dovetail_corpus` reads the curated S3 export that CAPE maintains (metadata-filterable; gated on `DOVETAIL_S3_BUCKET`). They coexist — use the live tool for freshness, the corpus for structured filtering over the blessed set.
 
 ## Configuration
 
@@ -227,7 +230,10 @@ All configuration lives in `.env`. Copy `.env.example` to `.env` and fill it in.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Your Anthropic API key. The agents use Claude. |
 | `TAVILY_API_KEY` | yes | Your Tavily API key. The research agent uses Tavily for web search and competitive intelligence. |
-| `DOVETAIL_API_TOKEN` | no | Optional. If you have a Dovetail UX research workspace, the research agent will pull customer evidence from it. Leave blank to skip. |
+| `DOVETAIL_API_TOKEN` | no | Optional. If you have a Dovetail UX research workspace, the research agent will pull customer evidence from it live. Leave blank to skip. |
+| `DOVETAIL_S3_BUCKET` | no | Optional (internal). S3 bucket holding the curated Dovetail→markdown export. When set, the `dovetail_corpus` tool is enabled. Uses boto3's standard AWS credential chain. Leave blank to skip. |
+| `DOVETAIL_S3_PREFIX` | no | Key prefix for the export objects. Defaults to `data/`. |
+| `DOVETAIL_KB_ID` | no | Optional. Bedrock Knowledge Base id over the export bucket; when set, `dovetail_corpus` search uses semantic retrieve instead of the S3 scan. (No KB is provisioned by default.) |
 | `STYLE_GUIDE_PATH` | no | Path to your writing style guide. Defaults to `examples/templates/style-guide-sample.md`. |
 | `OBSIDIAN_VAULT_PATH` | no | Optional. Path to your Obsidian vault if you want the agents to search your notes. |
 | `OUTPUT_DIR` | no | Where output files go. Defaults to `./output/`. |
