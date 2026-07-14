@@ -213,3 +213,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#running-tests) if you plan to submit chang
 - [README.md](README.md) for the CLI reference and architecture overview.
 - [GLOSSARY.md](GLOSSARY.md) if any of the terms in this guide are unfamiliar.
 - [examples/](examples/) to see what good output looks like before you commit to running the system on your own problem.
+- [docs/internal-mcp-setup.md](docs/internal-mcp-setup.md) if you are an Amazon employee and want the optional internal integrations — including the `publish-doc`, `seed-taskei`, and `ingest-feedback` write-back commands. Those are the only commands that write outside `./output/`, they require an internal MCP binary plus a live Midway session, and each one asks for an explicit confirmation before writing.

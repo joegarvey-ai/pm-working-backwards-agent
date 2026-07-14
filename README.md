@@ -187,9 +187,20 @@ Input file arguments below accept either `.md` (recommended) or `.yaml`/`.yml`.
 | `diff <old> <new>` | Compare two document versions section by section. Shows which sections were added, removed, or changed. Works best with agent-generated document pairs — manual header renames between versions appear as a deletion plus an addition rather than a single change. |
 | `view <artifact>` | Open a generated artifact in a terminal viewer (requires the `[ui]` extra: `uv pip install 'pm-working-backwards-agent[ui]'`). |
 | `feedback status` / `feedback classify` | Show the stakeholder feedback inbox dashboard, or route each open feedback item to the artifacts and sections it affects. |
+| `ingest-feedback --source slack --channel <id>` | Pull messages from a Slack channel and write each as an open feedback item into the inbox. Requires the `slack-mcp` binary + Midway. Pass `--since <date>` to bound the range. |
 | `clean --archive` / `--list` / `--delete-archive` | Manage the `./output/` directory retention policy. |
 
 Run `uv run pm_agent_system <command> --help` for the full options on any command.
+
+### Write-back commands (internal Amazon only)
+
+These are the **only commands that write outside `./output/`**. Each requires an internal MCP Gateway client binary (`builder-mcp` / `slack-mcp`) on PATH and a live Midway session (`mwinit -f`), and each publishes to an external system only after an **explicit `[y/N]` confirmation that defaults to No**. They are human actions you run *after* approving an artifact — no agent ever publishes or creates tasks autonomously. When the binary or Midway session is absent, they fail soft with a descriptive message and write nothing, exactly like the read integrations.
+
+| Command | What it does |
+|---|---|
+| `publish-doc --artifact-path <md> [--target quip] [--folder <ids>]` | Publish an approved artifact markdown to a document store. Shows a preview, then confirms before writing, and prints the resulting document URL. `quip` is the only target available today; a SharePoint target will slot in when its MCP tool ships (Amazon is migrating off Quip). |
+| `seed-taskei --brd-path <md> --taskei-room <id> [--dry-run] [--parent-task <id>]` | Create one Taskei task per BRD functional requirement, nested under a parent EPIC (or an existing `--parent-task`). Prints the full plan first; `--dry-run` stops there without writing. `--taskei-room` (or `TASKEI_ROOM_ID`) is required — there is no default room. |
+| `ingest-feedback --source slack --channel <id> [--since <date>]` | *(also listed above)* Ingest Slack stakeholder messages into the local feedback inbox. This one writes locally, not to an external system. |
 
 Every BRD generation also produces `brd_*_jira_import.csv` and `brd_*_linear_import.md` files in the output directory, ready to import into Jira or Linear. Column names and field labels are configurable — edit `config/jira_import_schema.yaml` and `config/linear_import_schema.yaml` to match your instance before importing.
 

@@ -2024,6 +2024,275 @@ def cmd_feedback_classify(args: argparse.Namespace) -> None:
     print(f"Total classify time: {total_elapsed:.1f}s")
 
 
+# ---------- Gated write-back commands (audit #19) ----------
+#
+# These are the ONLY commands that write outside output/. Each writes to an
+# external system (Quip/Taskei) via tools/write_back.py, or ingests into the
+# local feedback inbox, and each is gated behind an explicit input()
+# confirmation defaulting to No. Write helpers are never attached to an agent;
+# publishing/seeding is a human action invoked after the PM approves an
+# artifact.
+
+
+def _confirm(prompt: str) -> bool:
+    """Prompt for a yes/no confirmation, defaulting to No.
+
+    Returns True only when the user explicitly types 'y' or 'yes'. Any other
+    input, EOF (non-interactive), or empty line defaults to No, matching the
+    ``cmd_clean --delete-archive`` and BRD ``--verify`` gates. This is the
+    core safety property for every outward-facing write.
+    """
+    try:
+        resp = input(prompt).strip().lower()
+    except EOFError:
+        return False
+    return resp in {"y", "yes"}
+
+
+def _preview_lines(text: str, n: int = 15) -> str:
+    """Return the first *n* non-empty-trimmed lines of *text* for a preview."""
+    lines = text.splitlines()
+    head = lines[:n]
+    suffix = "" if len(lines) <= n else f"\n  ... ({len(lines) - n} more lines)"
+    return "\n".join(f"  {line}" for line in head) + suffix
+
+
+def cmd_publish_doc(args: argparse.Namespace) -> None:
+    """Publish an approved artifact markdown to a document store (e.g. Quip).
+
+    Reads the artifact, shows a preview (title + destination + first lines),
+    and requires an explicit confirmation before writing. Fails soft when the
+    MCP binary / Midway session is absent.
+    """
+    from pm_agent_system.tools import write_back
+
+    target = (args.target or "quip").strip().lower()
+    if target not in write_back.PUBLISH_TARGETS:
+        valid = ", ".join(sorted(write_back.PUBLISH_TARGETS))
+        print(f"Error: --target must be one of: {valid}. Got '{args.target}'.")
+        sys.exit(1)
+
+    artifact_path = Path(args.artifact_path).expanduser().resolve()
+    if not artifact_path.exists():
+        print(f"Error: artifact not found: {artifact_path}")
+        sys.exit(1)
+
+    try:
+        markdown = artifact_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"Error: could not read artifact: {exc}")
+        sys.exit(1)
+
+    if not markdown.strip():
+        print(f"Error: artifact is empty: {artifact_path}")
+        sys.exit(1)
+
+    # Title: first markdown H1 if present, else the filename stem.
+    title = artifact_path.stem
+    for line in markdown.splitlines():
+        if line.startswith("# "):
+            title = line[2:].strip()
+            break
+
+    folder = (getattr(args, "folder", "") or "").strip()
+    destination = f"{target}" + (f" (folder/members: {folder})" if folder else " (default location)")
+
+    print(f"\nAbout to publish to {target.upper()}:")
+    print(f"  Source:      {artifact_path}")
+    print(f"  Title:       {title}")
+    print(f"  Destination: {destination}")
+    print("  Preview:")
+    print(_preview_lines(markdown))
+    print()
+
+    if not _confirm(f"Publish this document to {target}? [y/N]: "):
+        print("Aborted. Nothing was published.")
+        return
+
+    print(f"Publishing to {target}...")
+    result = write_back.publish_document(
+        title=title, markdown=markdown, target=target, folder=folder
+    )
+    if write_back.is_write_error(result):
+        print(result)
+        return
+    print(f"Published. Document URL: {result}")
+
+
+def _fr_task_body(fr) -> str:
+    """Render a ParsedFR into a Taskei task description (markdown)."""
+    lines = [fr.description or "", ""]
+    if fr.rationale:
+        lines += [f"**Rationale:** {fr.rationale}", ""]
+    if fr.acceptance_criteria:
+        lines.append("**Acceptance criteria:**")
+        lines += [f"- {ac}" for ac in fr.acceptance_criteria]
+        lines.append("")
+    if fr.related_user_stories:
+        lines.append(f"**Related user stories:** {', '.join(fr.related_user_stories)}")
+    if fr.traceability:
+        lines.append(f"**Traceability:** {fr.traceability}")
+    lines.append("")
+    lines.append(f"_Seeded from BRD functional requirement {fr.id} by pm_agent_system._")
+    return "\n".join(lines).strip()
+
+
+def cmd_seed_taskei(args: argparse.Namespace) -> None:
+    """Create one Taskei task per BRD functional requirement, under a parent EPIC.
+
+    Parses functional requirements from the rendered BRD markdown, prints the
+    full plan, and (unless --dry-run) requires confirmation before creating a
+    parent EPIC and one child TASK per FR. Reports each created URL and is
+    safe on partial failure. Requires --taskei-room (or TASKEI_ROOM_ID).
+    """
+    from pm_agent_system.brd_fr_parser import parse_brd_file
+    from pm_agent_system.tools import write_back
+
+    # Room is mandatory: there is no sensible default for an OSS tool.
+    room = (getattr(args, "taskei_room", "") or os.getenv("TASKEI_ROOM_ID", "")).strip()
+    if not room:
+        print(
+            "Error: a Taskei room ID is required. Pass --taskei-room <uuid> or "
+            "set TASKEI_ROOM_ID in your environment. Refusing to run without a "
+            "target room."
+        )
+        sys.exit(1)
+
+    brd_path = Path(args.brd_path).expanduser().resolve()
+    if not brd_path.exists():
+        print(f"Error: BRD file not found: {brd_path}")
+        sys.exit(1)
+
+    frs = parse_brd_file(brd_path)
+    if not frs:
+        print(
+            f"Error: no functional requirements found in {brd_path.name}. "
+            f"Expected a '## Functional Requirements' section with '### FR-### ...' "
+            f"entries (as produced by the brd command)."
+        )
+        sys.exit(1)
+
+    dry_run = getattr(args, "dry_run", False)
+    parent_arg = (getattr(args, "parent_task", "") or "").strip()
+    epic_title = f"BRD: {brd_path.stem}"
+
+    print(f"\nSeed Taskei from BRD: {brd_path.name}")
+    print(f"  Target room: {room}")
+    if parent_arg:
+        print(f"  Parent task (provided): {parent_arg} — FR tasks nest under it; no EPIC created.")
+    else:
+        print(f"  Parent EPIC (to create): {epic_title}")
+    print(f"  Will create {len(frs)} task(s), one per functional requirement:")
+    for i, fr in enumerate(frs, 1):
+        desc = fr.description if len(fr.description) <= 70 else fr.description[:67] + "..."
+        print(f"    {i:>2}. {fr.id}: {desc}")
+    print()
+
+    if dry_run:
+        parent_note = (
+            f"under existing parent {parent_arg}" if parent_arg
+            else f"under a new EPIC '{epic_title}'"
+        )
+        print(f"[dry-run] Would create the EPIC (if needed) and {len(frs)} task(s) {parent_note}.")
+        print("[dry-run] No tasks were created.")
+        return
+
+    if not _confirm(f"Create {len(frs)} Taskei task(s) in room {room}? [y/N]: "):
+        print("Aborted. No tasks were created.")
+        return
+
+    # Determine the parent reference. A created EPIC returns a display value
+    # (URL / confirmation text), which is NOT itself a valid parentTask id, so
+    # we derive the parent identifier via extract_task_ref. An explicit
+    # --parent-task is already an id and is used verbatim.
+    parent_display = parent_arg  # what we print
+    parent_ref = parent_arg      # what we send as parentTask
+    if not parent_arg:
+        print(f"Creating parent EPIC: {epic_title} ...")
+        epic_body = (
+            f"Parent epic for functional requirements seeded from BRD "
+            f"'{brd_path.name}'.\n\n_Created by pm_agent_system seed-taskei._"
+        )
+        epic_result = write_back.create_taskei_epic(room, epic_title, epic_body)
+        if write_back.is_write_error(epic_result):
+            print(f"  Failed to create parent EPIC: {epic_result}")
+            print("Aborting: no child tasks created (nothing to parent them under).")
+            return
+        parent_display = epic_result
+        parent_ref = write_back.extract_task_ref(epic_result)
+        print(f"  EPIC created: {parent_display}")
+
+    created: list[tuple[str, str]] = []
+    failed: list[tuple[str, str]] = []
+    for fr in frs:
+        title = f"{fr.id}: {fr.description}"
+        if len(title) > 120:
+            title = title[:117] + "..."
+        result = write_back.create_taskei_task(
+            room,
+            title,
+            _fr_task_body(fr),
+            parent_task=parent_ref,
+        )
+        if write_back.is_write_error(result):
+            failed.append((fr.id, result))
+            print(f"  [FAIL] {fr.id}: {result}")
+        else:
+            created.append((fr.id, result))
+            print(f"  [ok]   {fr.id}: {result}")
+
+    print()
+    print(f"Created {len(created)}/{len(frs)} task(s) under parent {parent_display}.")
+    if failed:
+        print(f"{len(failed)} task(s) failed:")
+        for fr_id, err in failed:
+            print(f"  - {fr_id}: {err}")
+
+
+def cmd_ingest_feedback(args: argparse.Namespace) -> None:
+    """Ingest stakeholder feedback into the local feedback inbox.
+
+    v1 source: Slack. Pulls messages from a channel and writes each as a
+    FeedbackItem (status=open) into output/feedback/ via the feedback_inbox.
+    This writes locally, not to an external system, so it needs no external
+    write confirmation — but the Slack fetch fails soft if the MCP binary /
+    Midway session is absent.
+    """
+    from pm_agent_system.feedback_ingest import fetch_slack_feedback
+
+    source = (getattr(args, "source", "slack") or "slack").strip().lower()
+    if source != "slack":
+        print(f"Error: --source '{source}' is not supported. Only 'slack' is available in v1.")
+        sys.exit(1)
+
+    channel = (getattr(args, "channel", "") or "").strip()
+    if not channel:
+        print("Error: --channel is required for --source slack.")
+        sys.exit(1)
+
+    since = (getattr(args, "since", "") or "").strip()
+    print(f"\nIngesting Slack feedback from channel: {channel}")
+    if since:
+        print(f"  Since: {since}")
+
+    written_ids, error = fetch_slack_feedback(channel=channel, since=since or None)
+
+    if error:
+        print(error)
+        # Fail soft: no items written is a valid, non-crashing outcome.
+        if not written_ids:
+            return
+
+    if not written_ids:
+        print("No messages found to ingest.")
+        return
+
+    print(f"Ingested {len(written_ids)} feedback item(s):")
+    for fb_id in written_ids:
+        print(f"  {fb_id}")
+    print("\nRun 'pm_agent_system feedback classify' to route them to artifacts.")
+
+
 # Commands that produce fresh output and may run the retention sweep first.
 # Read commands (brd, build-spec, revise*, wireframes*) resolve a
 # user-supplied path out of output/, so sweeping first can archive the very
